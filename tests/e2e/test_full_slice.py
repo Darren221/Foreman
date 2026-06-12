@@ -14,7 +14,15 @@ import pytest
 
 from foreman.graph import run_task
 from foreman.llm.base import LLMProvider, T
-from foreman.schemas import Plan, ReviewResult, Specialist, Subtask, Synthesis, Task
+from foreman.schemas import (
+    Plan,
+    ResearchFindings,
+    ReviewResult,
+    Specialist,
+    Subtask,
+    Synthesis,
+    Task,
+)
 from foreman.tools import ToolRegistry, WebSearchTool
 
 
@@ -29,6 +37,8 @@ class SliceProvider(LLMProvider):
     def structured_complete(self, prompt: str, schema: type[T]) -> T:
         if schema is Plan:
             return self._plan  # type: ignore[return-value]
+        if schema is ResearchFindings:
+            return ResearchFindings(content="researched findings")  # type: ignore[return-value]
         if schema is ReviewResult:
             return self._review  # type: ignore[return-value]
         if schema is Synthesis:
@@ -81,6 +91,9 @@ def test_research_slice_produces_synthesized_result() -> None:
 
     assert state["review"].passed is True
     assert state["result"] == "The bicycle was invented in 1817."
+    # guard against silently exercising the degraded path
+    assert all("execution failed" not in o.content for o in state["outputs"])
+    assert state["outputs"][0].content == "researched findings"
 
 
 def test_pipeline_recovers_from_specialist_failure() -> None:

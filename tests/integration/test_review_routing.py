@@ -7,7 +7,15 @@ from typing import Any
 
 from foreman.graph import run_task
 from foreman.llm.base import LLMProvider, T
-from foreman.schemas import Plan, ReviewResult, Specialist, Subtask, Synthesis, Task
+from foreman.schemas import (
+    Plan,
+    ResearchFindings,
+    ReviewResult,
+    Specialist,
+    Subtask,
+    Synthesis,
+    Task,
+)
 from foreman.tools import ToolRegistry, WebSearchTool
 
 
@@ -24,6 +32,8 @@ class ScriptedProvider(LLMProvider):
     def structured_complete(self, prompt: str, schema: type[T]) -> T:
         if schema is Plan:
             return self._plan  # type: ignore[return-value]
+        if schema is ResearchFindings:
+            return ResearchFindings(content="researched findings")  # type: ignore[return-value]
         if schema is ReviewResult:
             verdict = self._reviews[0] if len(self._reviews) == 1 else self._reviews.pop(0)
             return verdict  # type: ignore[return-value]
