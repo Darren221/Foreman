@@ -17,4 +17,5 @@ class GraphState(TypedDict, total=False):
     plan: Plan | None
     outputs: list[SpecialistOutput]
     review: ReviewResult | None
+    attempts: int
     result: str | None

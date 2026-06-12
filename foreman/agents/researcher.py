@@ -19,10 +19,12 @@ class Researcher:
     def __init__(self, registry: ToolRegistry) -> None:
         self._registry = registry
 
-    def execute(self, subtask: Subtask) -> SpecialistOutput:
-        result = self._registry.invoke(
-            _TOOL, self.specialist, query=subtask.description
-        )
+    def execute(self, subtask: Subtask, feedback: str | None = None) -> SpecialistOutput:
+        query = subtask.description
+        if feedback:
+            # On a retry, fold the reviewer's feedback into the search.
+            query = f"{query} ({feedback})"
+        result = self._registry.invoke(_TOOL, self.specialist, query=query)
         content = self._summarise(result.get("results", []))
         return SpecialistOutput(
             subtask_id=subtask.id,

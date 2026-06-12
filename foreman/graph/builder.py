@@ -1,8 +1,10 @@
 """Assembles the agent pipeline as a LangGraph state machine.
 
-Phase 1: every node is a stub that produces placeholder values, so the wiring
-(state passing, edge order) can be proven end-to-end before any node does real
-work. Tasks T2-T5 replace these stubs one at a time; the graph shape stays put.
+The pipeline runs intake -> plan -> execute -> review -> synthesize. The review
+node feeds a conditional edge: a passing verdict goes to synthesis, a failing one
+routes back to execute (with the reviewer's feedback) until a retry cap, after
+which the pipeline proceeds rather than looping forever. `synthesize` is the only
+remaining stub (replaced in T5).
 """
 
 from __future__ import annotations
@@ -11,19 +13,22 @@ from typing import Any, cast
 
 from langgraph.graph import END, START, StateGraph
 
-from foreman.agents import Researcher, Supervisor
+from foreman.agents import Researcher, Reviewer, Supervisor
 from foreman.graph.state import GraphState
 from foreman.llm.base import LLMProvider
 from foreman.schemas import ReviewResult, Task
 from foreman.tools import ToolRegistry
 
+MAX_ATTEMPTS = 2
+
 
 def build_graph(provider: LLMProvider, registry: ToolRegistry) -> Any:
     """Wire the nodes into a compiled graph. `provider` and `registry` are the
-    dependencies the real agents need; stubs that remain ignore them."""
+    dependencies the agents need."""
 
     supervisor = Supervisor(provider)
     researcher = Researcher(registry)
+    reviewer = Reviewer(provider)
 
     def plan_node(state: GraphState) -> GraphState:
         return {"plan": supervisor.plan(state["task"])}
@@ -31,11 +36,29 @@ def build_graph(provider: LLMProvider, registry: ToolRegistry) -> Any:
     def execute_node(state: GraphState) -> GraphState:
         plan = state["plan"]
         assert plan is not None
-        outputs = [researcher.execute(s) for s in plan.subtasks]
+        review = state.get("review")
+        feedback = review.feedback if review and not review.passed else None
+        outputs = [researcher.execute(s, feedback=feedback) for s in plan.subtasks]
         return {"outputs": outputs}
 
     def review_node(state: GraphState) -> GraphState:
-        return {"review": ReviewResult(passed=True, score=1.0, feedback="stub: accepted")}
+        plan = state["plan"]
+        assert plan is not None
+        subtasks = {s.id: s for s in plan.subtasks}
+        attempts = state.get("attempts", 0) + 1
+        verdict = ReviewResult(passed=True, score=1.0, feedback="")
+        for output in state.get("outputs") or []:
+            verdict = reviewer.review(subtasks[output.subtask_id], output)
+            if not verdict.passed:
+                break
+        return {"review": verdict, "attempts": attempts}
+
+    def route_after_review(state: GraphState) -> str:
+        review = state["review"]
+        assert review is not None
+        if review.passed or state.get("attempts", 0) >= MAX_ATTEMPTS:
+            return "synthesize"
+        return "execute"
 
     def synthesize_node(state: GraphState) -> GraphState:
         outputs = state.get("outputs") or []
@@ -51,7 +74,7 @@ def build_graph(provider: LLMProvider, registry: ToolRegistry) -> Any:
     graph.add_edge(START, "plan")
     graph.add_edge("plan", "execute")
     graph.add_edge("execute", "review")
-    graph.add_edge("review", "synthesize")
+    graph.add_conditional_edges("review", route_after_review, ["execute", "synthesize"])
     graph.add_edge("synthesize", END)
 
     return graph.compile()
