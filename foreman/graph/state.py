@@ -9,11 +9,12 @@ from __future__ import annotations
 
 from typing import TypedDict
 
-from foreman.schemas import Plan, ReviewResult, SpecialistOutput, Task
+from foreman.schemas import Plan, ReviewResult, SpecialistOutput, Task, TaskMemory
 
 
 class GraphState(TypedDict, total=False):
     task: Task
+    retrieved_memories: list[TaskMemory]
     plan: Plan | None
     outputs: list[SpecialistOutput]
     review: ReviewResult | None

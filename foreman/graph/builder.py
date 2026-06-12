@@ -1,10 +1,11 @@
 """Assembles the agent pipeline as a LangGraph state machine.
 
-The pipeline runs intake -> plan -> execute -> review -> synthesize. The review
-node feeds a conditional edge: a passing verdict goes to synthesis, a failing one
-routes back to execute (with the reviewer's feedback) until a retry cap, after
-which the pipeline proceeds rather than looping forever. A specialist failure is
-captured as output rather than crashing the run.
+The pipeline runs retrieve -> plan -> execute -> review -> synthesize -> remember.
+`retrieve` recalls similar past tasks to inform planning; `remember` stores a
+memory of this run. The review node feeds a conditional edge: a passing verdict
+goes to synthesis, a failing one routes back to execute (with the reviewer's
+feedback) until a retry cap, after which the pipeline proceeds rather than
+looping forever. A specialist failure is captured as output rather than crashing.
 """
 
 from __future__ import annotations
@@ -34,8 +35,13 @@ def build_graph(
     researcher = Researcher(registry, provider)
     reviewer = Reviewer(provider)
 
+    def retrieve_node(state: GraphState) -> GraphState:
+        memories = memory_store.recall(state["task"].description)
+        return {"retrieved_memories": memories}
+
     def plan_node(state: GraphState) -> GraphState:
-        return {"plan": supervisor.plan(state["task"])}
+        memories = state.get("retrieved_memories")
+        return {"plan": supervisor.plan(state["task"], memories)}
 
     def execute_node(state: GraphState) -> GraphState:
         plan = state["plan"]
@@ -96,13 +102,15 @@ def build_graph(
         return {}
 
     graph = StateGraph(GraphState)
+    graph.add_node("retrieve", retrieve_node)
     graph.add_node("plan", plan_node)
     graph.add_node("execute", execute_node)
     graph.add_node("review", review_node)
     graph.add_node("synthesize", synthesize_node)
     graph.add_node("remember", remember_node)
 
-    graph.add_edge(START, "plan")
+    graph.add_edge(START, "retrieve")
+    graph.add_edge("retrieve", "plan")
     graph.add_edge("plan", "execute")
     graph.add_edge("execute", "review")
     graph.add_conditional_edges("review", route_after_review, ["execute", "synthesize"])
