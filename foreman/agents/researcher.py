@@ -11,6 +11,8 @@ from foreman.schemas import Specialist, SpecialistOutput, Subtask
 from foreman.tools import ToolRegistry
 
 _TOOL = "web_search"
+# Tavily (and most search APIs) reject overly long queries; keep within the limit.
+_MAX_QUERY_LEN = 400
 
 
 class Researcher:
@@ -20,10 +22,7 @@ class Researcher:
         self._registry = registry
 
     def execute(self, subtask: Subtask, feedback: str | None = None) -> SpecialistOutput:
-        query = subtask.description
-        if feedback:
-            # On a retry, fold the reviewer's feedback into the search.
-            query = f"{query} ({feedback})"
+        query = self._build_query(subtask.description, feedback)
         result = self._registry.invoke(_TOOL, self.specialist, query=query)
         content = self._summarise(result.get("results", []))
         return SpecialistOutput(
@@ -31,6 +30,18 @@ class Researcher:
             content=content,
             tools_used=[_TOOL],
         )
+
+    @staticmethod
+    def _build_query(description: str, feedback: str | None) -> str:
+        # The query is the topic to search for. Reviewer feedback is about output
+        # quality, not search terms — fold it in only if it still fits the limit,
+        # otherwise search the topic alone. Never exceed the provider's cap.
+        query = description
+        if feedback:
+            candidate = f"{description} {feedback}"
+            if len(candidate) <= _MAX_QUERY_LEN:
+                query = candidate
+        return query[:_MAX_QUERY_LEN]
 
     @staticmethod
     def _summarise(results: list[dict[str, object]]) -> str:
