@@ -24,6 +24,7 @@ from foreman.schemas import (
     Task,
 )
 from foreman.tools import ToolRegistry, WebSearchTool
+from tests.support import NullMemoryStore
 
 
 class SliceProvider(LLMProvider):
@@ -87,6 +88,7 @@ def test_research_slice_produces_synthesized_result() -> None:
         provider,
         Task(description="Research the history of the bicycle"),
         registry=_registry(FakeBackend()),
+        memory_store=NullMemoryStore(),
     )
 
     assert state["review"].passed is True
@@ -105,7 +107,9 @@ def test_pipeline_recovers_from_specialist_failure() -> None:
     )
 
     # Must not raise despite the tool failing on every attempt.
-    state = run_task(provider, Task(description="anything"), registry=reg)
+    state = run_task(
+        provider, Task(description="anything"), registry=reg, memory_store=NullMemoryStore()
+    )
 
     assert isinstance(state["result"], str) and state["result"]
     # the search failure was recorded, and retries were capped

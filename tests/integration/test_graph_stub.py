@@ -22,6 +22,7 @@ from foreman.schemas import (
     Task,
 )
 from foreman.tools import ToolRegistry, WebSearchTool
+from tests.support import NullMemoryStore
 
 
 class CannedProvider(LLMProvider):
@@ -74,6 +75,7 @@ def test_graph_runs_end_to_end() -> None:
         provider,
         Task(description="research the history of the bicycle"),
         registry=_registry(),
+        memory_store=NullMemoryStore(),
     )
 
     assert state["plan"] is not None
