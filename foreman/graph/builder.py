@@ -11,37 +11,20 @@ from typing import Any, cast
 
 from langgraph.graph import END, START, StateGraph
 
+from foreman.agents import Supervisor
 from foreman.graph.state import GraphState
 from foreman.llm.base import LLMProvider
-from foreman.schemas import (
-    Plan,
-    ReviewResult,
-    Specialist,
-    SpecialistOutput,
-    Subtask,
-    Task,
-)
+from foreman.schemas import ReviewResult, SpecialistOutput, Task
 
 
 def build_graph(provider: LLMProvider) -> Any:
     """Wire the nodes into a compiled graph. `provider` is captured for the
     real agents that replace these stubs in later tasks."""
 
+    supervisor = Supervisor(provider)
+
     def plan_node(state: GraphState) -> GraphState:
-        task = state["task"]
-        plan = Plan(
-            task_id=task.id,
-            subtasks=[
-                Subtask(
-                    id="s1",
-                    description=f"research: {task.description}",
-                    assigned_specialist=Specialist.RESEARCHER,
-                    expected_output="findings",
-                    complexity=1,
-                )
-            ],
-        )
-        return {"plan": plan}
+        return {"plan": supervisor.plan(state["task"])}
 
     def execute_node(state: GraphState) -> GraphState:
         plan = state["plan"]

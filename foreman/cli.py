@@ -1,7 +1,7 @@
 """Command-line entrypoint: `foreman run "<task>"`.
 
-Phase 1 wires the stub pipeline so the skeleton is runnable. T5 replaces this
-with a real entrypoint once the agents do real work.
+From T2 on, the pipeline does real LLM work, so a provider is required; the CLI
+exits cleanly with guidance if none is configured.
 """
 
 from __future__ import annotations
@@ -11,28 +11,7 @@ import sys
 
 from foreman.config import Settings
 from foreman.graph import run_task
-from foreman.llm.base import LLMProvider, T
-from foreman.llm.router import select_provider
 from foreman.schemas import Task
-
-
-class _NullProvider(LLMProvider):
-    """Stand-in used when no API key is configured. Phase-1 nodes never call the
-    LLM, so the skeleton stays runnable offline; this is removed once real agents
-    land and a provider becomes mandatory."""
-
-    name = "null"
-
-    def structured_complete(self, prompt: str, schema: type[T]) -> T:
-        raise RuntimeError("no LLM provider configured (set an API key in .env)")
-
-
-def _resolve_provider(settings: Settings) -> LLMProvider:
-    try:
-        return select_provider(settings)
-    except ValueError:
-        print("note: no provider key set — running the stub pipeline offline\n", file=sys.stderr)
-        return _NullProvider()
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -44,7 +23,15 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command == "run":
         settings = Settings()
-        provider = _resolve_provider(settings)
+        try:
+            from foreman.llm import select_provider
+
+            provider = select_provider(settings)
+        except ValueError as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            print("set a provider key in .env (see .env.example)", file=sys.stderr)
+            return 2
+
         state = run_task(provider, Task(description=args.task))
         print(state["result"])
         return 0
