@@ -36,6 +36,8 @@ class Task(BaseModel):
 
     id: str = Field(default_factory=_new_id)
     description: str
+    require_approval: bool = False
+    sensitive: bool = False
 
 
 class Subtask(BaseModel):

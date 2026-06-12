@@ -17,6 +17,7 @@ dependencies = [
     "pydantic-settings>=2.3",
     "tavily-python>=0.5",
     "chromadb>=0.5",
+    "langgraph-checkpoint-sqlite>=2.0",
 ]
 
 [project.optional-dependencies]

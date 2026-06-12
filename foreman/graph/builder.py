@@ -13,6 +13,7 @@ from __future__ import annotations
 from typing import Any, cast
 
 from langgraph.graph import END, START, StateGraph
+from langgraph.types import interrupt
 
 from foreman.agents import Researcher, Reviewer, Supervisor
 from foreman.graph.state import GraphState
@@ -26,10 +27,14 @@ _RESULT_SNIPPET_LEN = 500
 
 
 def build_graph(
-    provider: LLMProvider, registry: ToolRegistry, memory_store: MemoryStore
+    provider: LLMProvider,
+    registry: ToolRegistry,
+    memory_store: MemoryStore,
+    checkpointer: Any = None,
 ) -> Any:
     """Wire the nodes into a compiled graph. `provider`, `registry`, and
-    `memory_store` are the dependencies the nodes need."""
+    `memory_store` are the dependencies the nodes need. A `checkpointer` enables
+    durable pause/resume (required for the human-in-the-loop interrupt)."""
 
     supervisor = Supervisor(provider)
     researcher = Researcher(registry, provider)
@@ -42,6 +47,15 @@ def build_graph(
     def plan_node(state: GraphState) -> GraphState:
         memories = state.get("retrieved_memories")
         return {"plan": supervisor.plan(state["task"], memories)}
+
+    def approval_node(state: GraphState) -> GraphState:
+        # Human-in-the-loop gate. Only pauses when approval is required (and a
+        # checkpointer is present); otherwise it's a passthrough, so the default
+        # pipeline is unchanged. Resume value is the human's decision (unused in
+        # H1 — the escalation policy and decisions land in H2/H3).
+        if state["task"].require_approval:
+            interrupt({"plan": state.get("plan"), "reason": "approval required"})
+        return {}
 
     def execute_node(state: GraphState) -> GraphState:
         plan = state["plan"]
@@ -104,6 +118,7 @@ def build_graph(
     graph = StateGraph(GraphState)
     graph.add_node("retrieve", retrieve_node)
     graph.add_node("plan", plan_node)
+    graph.add_node("approval", approval_node)
     graph.add_node("execute", execute_node)
     graph.add_node("review", review_node)
     graph.add_node("synthesize", synthesize_node)
@@ -111,13 +126,14 @@ def build_graph(
 
     graph.add_edge(START, "retrieve")
     graph.add_edge("retrieve", "plan")
-    graph.add_edge("plan", "execute")
+    graph.add_edge("plan", "approval")
+    graph.add_edge("approval", "execute")
     graph.add_edge("execute", "review")
     graph.add_conditional_edges("review", route_after_review, ["execute", "synthesize"])
     graph.add_edge("synthesize", "remember")
     graph.add_edge("remember", END)
 
-    return graph.compile()
+    return graph.compile(checkpointer=checkpointer)
 
 
 def run_task(
