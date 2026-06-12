@@ -1,15 +1,19 @@
 """The graph must run end-to-end as stubs are replaced by real agents.
 
-As of T2 the `plan` node calls the supervisor (LLM); execute/review/synthesize
-are still stubs. A canned provider supplies a deterministic `Plan` so the test
-stays free and offline while proving the full pipeline still reaches a result.
+As of T3 the `plan` node calls the supervisor (LLM) and `execute` runs the
+researcher (web search); review/synthesize remain stubs. A canned provider and a
+fake search backend keep the test free and offline while proving the full
+pipeline still reaches a result.
 """
 
 from __future__ import annotations
 
+from typing import Any
+
 from foreman.graph import run_task
 from foreman.llm.base import LLMProvider, T
 from foreman.schemas import Plan, Specialist, Subtask, Task
+from foreman.tools import ToolRegistry, WebSearchTool
 
 
 class CannedProvider(LLMProvider):
@@ -37,9 +41,24 @@ def _canned_plan() -> Plan:
     )
 
 
+class FakeBackend:
+    def search(self, query: str, max_results: int) -> list[dict[str, Any]]:
+        return [{"title": "Bicycle", "url": "http://x", "content": "Invented in 1817."}]
+
+
+def _registry() -> ToolRegistry:
+    reg = ToolRegistry()
+    reg.register(WebSearchTool(FakeBackend()))
+    return reg
+
+
 def test_graph_runs_end_to_end() -> None:
     provider = CannedProvider(_canned_plan())
-    state = run_task(provider, Task(description="research the history of the bicycle"))
+    state = run_task(
+        provider,
+        Task(description="research the history of the bicycle"),
+        registry=_registry(),
+    )
 
     assert state["plan"] is not None
     assert state["plan"].subtasks[0].assigned_specialist is Specialist.RESEARCHER

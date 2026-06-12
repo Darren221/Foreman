@@ -11,17 +11,19 @@ from typing import Any, cast
 
 from langgraph.graph import END, START, StateGraph
 
-from foreman.agents import Supervisor
+from foreman.agents import Researcher, Supervisor
 from foreman.graph.state import GraphState
 from foreman.llm.base import LLMProvider
-from foreman.schemas import ReviewResult, SpecialistOutput, Task
+from foreman.schemas import ReviewResult, Task
+from foreman.tools import ToolRegistry
 
 
-def build_graph(provider: LLMProvider) -> Any:
-    """Wire the nodes into a compiled graph. `provider` is captured for the
-    real agents that replace these stubs in later tasks."""
+def build_graph(provider: LLMProvider, registry: ToolRegistry) -> Any:
+    """Wire the nodes into a compiled graph. `provider` and `registry` are the
+    dependencies the real agents need; stubs that remain ignore them."""
 
     supervisor = Supervisor(provider)
+    researcher = Researcher(registry)
 
     def plan_node(state: GraphState) -> GraphState:
         return {"plan": supervisor.plan(state["task"])}
@@ -29,10 +31,7 @@ def build_graph(provider: LLMProvider) -> Any:
     def execute_node(state: GraphState) -> GraphState:
         plan = state["plan"]
         assert plan is not None
-        outputs = [
-            SpecialistOutput(subtask_id=s.id, content=f"[stub output for {s.id}]")
-            for s in plan.subtasks
-        ]
+        outputs = [researcher.execute(s) for s in plan.subtasks]
         return {"outputs": outputs}
 
     def review_node(state: GraphState) -> GraphState:
@@ -58,7 +57,18 @@ def build_graph(provider: LLMProvider) -> Any:
     return graph.compile()
 
 
-def run_task(provider: LLMProvider, task: Task) -> GraphState:
-    """Run a task through the compiled graph and return the final state."""
-    graph = build_graph(provider)
+def run_task(
+    provider: LLMProvider, task: Task, registry: ToolRegistry | None = None
+) -> GraphState:
+    """Run a task through the compiled graph and return the final state.
+
+    A registry can be injected (tests pass one with a fake search backend);
+    otherwise the default registry is built from settings.
+    """
+    if registry is None:
+        from foreman.config import Settings
+        from foreman.tools import build_default_registry
+
+        registry = build_default_registry(Settings())
+    graph = build_graph(provider, registry)
     return cast(GraphState, graph.invoke({"task": task}))

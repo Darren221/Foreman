@@ -20,6 +20,7 @@ class Settings(BaseSettings):
     default_provider: ProviderName = "anthropic"
     openai_api_key: str | None = None
     anthropic_api_key: str | None = None
+    tavily_api_key: str | None = None
 
     openai_model: str = "gpt-4o"
     anthropic_model: str = "claude-sonnet-4-6"
