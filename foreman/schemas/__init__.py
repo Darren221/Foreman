@@ -103,6 +103,12 @@ class ReviewResult(BaseModel):
     feedback: str = ""
 
 
+class ResearchFindings(BaseModel):
+    """A specialist's findings, written up from raw tool output."""
+
+    content: str
+
+
 class Synthesis(BaseModel):
     """The supervisor's final deliverable, composed from specialist outputs."""
 

@@ -27,14 +27,25 @@ def _output() -> SpecialistOutput:
     return SpecialistOutput(subtask_id="s1", content="Invented in 1817.")
 
 
-def test_reviewer_passes_good_output() -> None:
-    verdict = ReviewResult(passed=True, score=0.9, feedback="solid")
+def test_pass_decision_comes_from_score_not_model_flag() -> None:
+    # Model says passed=False, but a high score must pass: our threshold owns the
+    # decision, the model only assesses quality.
+    verdict = ReviewResult(passed=False, score=0.9, feedback="solid")
     result = Reviewer(CannedProvider(verdict)).review(_subtask(), _output())
     assert result.passed is True
+    assert result.score == 0.9
 
 
-def test_reviewer_fails_bad_output() -> None:
-    verdict = ReviewResult(passed=False, score=0.2, feedback="missing dates")
+def test_low_score_fails_even_if_model_says_passed() -> None:
+    verdict = ReviewResult(passed=True, score=0.2, feedback="missing dates")
     result = Reviewer(CannedProvider(verdict)).review(_subtask(), _output())
     assert result.passed is False
     assert result.feedback == "missing dates"
+
+
+def test_pass_threshold_is_configurable() -> None:
+    verdict = ReviewResult(passed=True, score=0.8, feedback="ok")
+    strict = Reviewer(CannedProvider(verdict), pass_threshold=0.95)
+    lenient = Reviewer(CannedProvider(verdict), pass_threshold=0.5)
+    assert strict.review(_subtask(), _output()).passed is False
+    assert lenient.review(_subtask(), _output()).passed is True

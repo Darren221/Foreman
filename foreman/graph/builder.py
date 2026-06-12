@@ -27,7 +27,7 @@ def build_graph(provider: LLMProvider, registry: ToolRegistry) -> Any:
     dependencies the agents need."""
 
     supervisor = Supervisor(provider)
-    researcher = Researcher(registry)
+    researcher = Researcher(registry, provider)
     reviewer = Reviewer(provider)
 
     def plan_node(state: GraphState) -> GraphState:
