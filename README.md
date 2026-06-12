@@ -14,7 +14,8 @@ observability are being layered in.
 
 ## Requirements
 
-- Python 3.11+
+- Python 3.11–3.13. (ChromaDB depends on `onnxruntime`, which has no wheel for
+  3.14 yet — use 3.12 for development.)
 
 ## Development
 

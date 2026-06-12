@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Literal
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -24,6 +25,9 @@ class Settings(BaseSettings):
 
     openai_model: str = "gpt-4o"
     anthropic_model: str = "claude-sonnet-4-6"
+
+    embedding_model: str = "text-embedding-3-small"
+    memory_path: Path = Path("./data/memory")
 
 
 __all__ = ["Settings", "ProviderName"]

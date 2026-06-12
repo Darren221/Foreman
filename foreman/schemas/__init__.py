@@ -9,6 +9,7 @@ rather than corrupting state downstream.
 from __future__ import annotations
 
 import uuid
+from datetime import UTC, datetime
 from enum import StrEnum
 
 from pydantic import BaseModel, Field, model_validator
@@ -113,3 +114,19 @@ class Synthesis(BaseModel):
     """The supervisor's final deliverable, composed from specialist outputs."""
 
     result: str
+
+
+class TaskMemory(BaseModel):
+    """A distilled record of a finished task, stored for future recall.
+
+    `task_description` is the semantic key (what gets embedded); the rest captures
+    what happened so a future, similar task can learn from it.
+    """
+
+    id: str = Field(default_factory=_new_id)
+    task_description: str
+    outcome: str
+    score: float = Field(ge=0.0, le=1.0)
+    tools_used: list[str] = Field(default_factory=list)
+    result_snippet: str = ""
+    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
