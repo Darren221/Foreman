@@ -3,8 +3,8 @@
 The pipeline runs intake -> plan -> execute -> review -> synthesize. The review
 node feeds a conditional edge: a passing verdict goes to synthesis, a failing one
 routes back to execute (with the reviewer's feedback) until a retry cap, after
-which the pipeline proceeds rather than looping forever. `synthesize` is the only
-remaining stub (replaced in T5).
+which the pipeline proceeds rather than looping forever. A specialist failure is
+captured as output rather than crashing the run.
 """
 
 from __future__ import annotations
@@ -16,7 +16,7 @@ from langgraph.graph import END, START, StateGraph
 from foreman.agents import Researcher, Reviewer, Supervisor
 from foreman.graph.state import GraphState
 from foreman.llm.base import LLMProvider
-from foreman.schemas import ReviewResult, Task
+from foreman.schemas import ReviewResult, SpecialistOutput, Task
 from foreman.tools import ToolRegistry
 
 MAX_ATTEMPTS = 2
@@ -38,7 +38,19 @@ def build_graph(provider: LLMProvider, registry: ToolRegistry) -> Any:
         assert plan is not None
         review = state.get("review")
         feedback = review.feedback if review and not review.passed else None
-        outputs = [researcher.execute(s, feedback=feedback) for s in plan.subtasks]
+        outputs = []
+        for subtask in plan.subtasks:
+            try:
+                outputs.append(researcher.execute(subtask, feedback=feedback))
+            except Exception as exc:
+                # Degrade gracefully: capture the failure as output so the
+                # reviewer can reject it and the pipeline keeps moving.
+                outputs.append(
+                    SpecialistOutput(
+                        subtask_id=subtask.id,
+                        content=f"[execution failed: {exc}]",
+                    )
+                )
         return {"outputs": outputs}
 
     def review_node(state: GraphState) -> GraphState:
@@ -62,8 +74,7 @@ def build_graph(provider: LLMProvider, registry: ToolRegistry) -> Any:
 
     def synthesize_node(state: GraphState) -> GraphState:
         outputs = state.get("outputs") or []
-        joined = "\n".join(o.content for o in outputs)
-        return {"result": f"[stub synthesis]\n{joined}"}
+        return {"result": supervisor.synthesize(state["task"], outputs)}
 
     graph = StateGraph(GraphState)
     graph.add_node("plan", plan_node)

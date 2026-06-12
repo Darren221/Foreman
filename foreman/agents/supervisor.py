@@ -9,7 +9,7 @@ assign work to specialists that are actually wired.
 from __future__ import annotations
 
 from foreman.llm.base import LLMProvider
-from foreman.schemas import Plan, Specialist, Task
+from foreman.schemas import Plan, Specialist, SpecialistOutput, Synthesis, Task
 
 _DEFAULT_AVAILABLE = frozenset({Specialist.RESEARCHER})
 
@@ -26,6 +26,16 @@ Rules:
 
 Task id: {task_id}
 Task: {description}
+"""
+
+_SYNTHESIS_PROMPT = """\
+You are the supervisor. Combine the specialist findings below into a single,
+coherent written answer to the original task.
+
+Task: {description}
+
+Findings:
+{findings}
 """
 
 
@@ -47,6 +57,11 @@ class Supervisor:
         plan = self._provider.structured_complete(prompt, Plan)
         self._check_specialists(plan)
         return plan
+
+    def synthesize(self, task: Task, outputs: list[SpecialistOutput]) -> str:
+        findings = "\n\n".join(o.content for o in outputs)
+        prompt = _SYNTHESIS_PROMPT.format(description=task.description, findings=findings)
+        return self._provider.structured_complete(prompt, Synthesis).result
 
     def _check_specialists(self, plan: Plan) -> None:
         for subtask in plan.subtasks:

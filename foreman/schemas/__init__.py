@@ -101,3 +101,9 @@ class ReviewResult(BaseModel):
     passed: bool
     score: float = Field(ge=0.0, le=1.0)
     feedback: str = ""
+
+
+class Synthesis(BaseModel):
+    """The supervisor's final deliverable, composed from specialist outputs."""
+
+    result: str

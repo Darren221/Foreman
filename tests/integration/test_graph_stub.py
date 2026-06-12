@@ -12,12 +12,12 @@ from typing import Any
 
 from foreman.graph import run_task
 from foreman.llm.base import LLMProvider, T
-from foreman.schemas import Plan, ReviewResult, Specialist, Subtask, Task
+from foreman.schemas import Plan, ReviewResult, Specialist, Subtask, Synthesis, Task
 from foreman.tools import ToolRegistry, WebSearchTool
 
 
 class CannedProvider(LLMProvider):
-    """Returns a canned Plan for planning and an accepting verdict for review."""
+    """Returns a canned Plan, an accepting verdict, and a synthesised result."""
 
     name = "canned"
 
@@ -27,6 +27,8 @@ class CannedProvider(LLMProvider):
     def structured_complete(self, prompt: str, schema: type[T]) -> T:
         if schema is ReviewResult:
             return ReviewResult(passed=True, score=1.0, feedback="ok")  # type: ignore[return-value]
+        if schema is Synthesis:
+            return Synthesis(result="synthesised result")  # type: ignore[return-value]
         return self._plan  # type: ignore[return-value]
 
 
