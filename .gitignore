@@ -16,6 +16,9 @@ env/
 .ruff_cache/
 .mypy_cache/
 
+# Local data (vector store, etc.)
+data/
+
 # Environment & secrets
 .env
 .env.*

@@ -17,6 +17,7 @@ from foreman.schemas import (
     Task,
 )
 from foreman.tools import ToolRegistry, WebSearchTool
+from tests.support import NullMemoryStore
 
 
 class ScriptedProvider(LLMProvider):
@@ -79,7 +80,9 @@ def _failed() -> ReviewResult:
 def test_passing_review_does_not_retry() -> None:
     reg = _registry()
     provider = ScriptedProvider(_plan(), [_passed()])
-    state = run_task(provider, Task(description="x"), registry=reg)
+    state = run_task(
+        provider, Task(description="x"), registry=reg, memory_store=NullMemoryStore()
+    )
 
     assert state["review"].passed is True
     # researcher ran exactly once — no retry
@@ -89,7 +92,9 @@ def test_passing_review_does_not_retry() -> None:
 def test_failed_review_retries_then_passes() -> None:
     reg = _registry()
     provider = ScriptedProvider(_plan(), [_failed(), _passed()])
-    state = run_task(provider, Task(description="x"), registry=reg)
+    state = run_task(
+        provider, Task(description="x"), registry=reg, memory_store=NullMemoryStore()
+    )
 
     assert state["review"].passed is True
     assert sum(i.tool == "web_search" for i in reg.invocations) == 2  # one retry
@@ -98,7 +103,9 @@ def test_failed_review_retries_then_passes() -> None:
 def test_retry_cap_halts_always_failing_loop() -> None:
     reg = _registry()
     provider = ScriptedProvider(_plan(), [_failed()])  # always fails
-    state = run_task(provider, Task(description="x"), registry=reg)
+    state = run_task(
+        provider, Task(description="x"), registry=reg, memory_store=NullMemoryStore()
+    )
 
     assert state["review"].passed is False
     # capped: at most 2 attempts, and the pipeline still produced a result

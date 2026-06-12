@@ -16,6 +16,7 @@ dependencies = [
     "pydantic>=2.7",
     "pydantic-settings>=2.3",
     "tavily-python>=0.5",
+    "chromadb>=0.5",
 ]
 
 [project.optional-dependencies]
