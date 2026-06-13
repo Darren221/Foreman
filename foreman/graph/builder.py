@@ -17,6 +17,8 @@ from langgraph.types import interrupt
 
 from foreman.agents import Researcher, Reviewer, Supervisor
 from foreman.graph.state import GraphState
+from foreman.hitl.policy import ApprovalLevel, EscalationPolicy
+from foreman.hitl.queue import Decision, DecisionKind
 from foreman.llm.base import LLMProvider
 from foreman.memory import MemoryStore
 from foreman.schemas import ReviewResult, SpecialistOutput, Task, TaskMemory
@@ -26,19 +28,42 @@ MAX_ATTEMPTS = 2
 _RESULT_SNIPPET_LEN = 500
 
 
+def _apply_decision(decision: Decision, state: GraphState) -> GraphState:
+    """Translate a human's approval decision into a state update.
+
+    Take-over delivers the human's own output and marks the run resolved, so the
+    agents stand down. Modify swaps in the human's plan. Reject re-runs the work
+    carrying the feedback (the same channel the reviewer uses on a retry), so the
+    next pass can address it. Approve is a no-op — the run just proceeds.
+    """
+    if decision.kind is DecisionKind.TAKE_OVER:
+        return {
+            "result": decision.output,
+            "review": ReviewResult(passed=True, score=1.0, feedback="human take-over"),
+        }
+    if decision.kind is DecisionKind.MODIFY and decision.plan is not None:
+        return {"plan": decision.plan}
+    if decision.kind is DecisionKind.REJECT:
+        return {"review": ReviewResult(passed=False, score=0.0, feedback=decision.feedback)}
+    return {}
+
+
 def build_graph(
     provider: LLMProvider,
     registry: ToolRegistry,
     memory_store: MemoryStore,
     checkpointer: Any = None,
+    policy: EscalationPolicy | None = None,
 ) -> Any:
     """Wire the nodes into a compiled graph. `provider`, `registry`, and
     `memory_store` are the dependencies the nodes need. A `checkpointer` enables
-    durable pause/resume (required for the human-in-the-loop interrupt)."""
+    durable pause/resume (required for the human-in-the-loop interrupt); `policy`
+    decides when that interrupt fires (defaults to the standard thresholds)."""
 
     supervisor = Supervisor(provider)
     researcher = Researcher(registry, provider)
     reviewer = Reviewer(provider)
+    policy = policy or EscalationPolicy()
 
     def retrieve_node(state: GraphState) -> GraphState:
         memories = memory_store.recall(state["task"].description)
@@ -49,13 +74,20 @@ def build_graph(
         return {"plan": supervisor.plan(state["task"], memories)}
 
     def approval_node(state: GraphState) -> GraphState:
-        # Human-in-the-loop gate. Only pauses when approval is required (and a
-        # checkpointer is present); otherwise it's a passthrough, so the default
-        # pipeline is unchanged. Resume value is the human's decision (unused in
-        # H1 — the escalation policy and decisions land in H2/H3).
-        if state["task"].require_approval:
-            interrupt({"plan": state.get("plan"), "reason": "approval required"})
-        return {}
+        # Human-in-the-loop gate, sited after planning and before execution. The
+        # policy decides whether to pause; a clean run produces no escalation and
+        # passes straight through, so the default pipeline is unchanged. When it
+        # does pause, the resume value is the human's Decision, applied below.
+        escalation = policy.evaluate(state)
+        if escalation is None or escalation.level is ApprovalLevel.NOTIFY:
+            return {}
+        decision = Decision.model_validate(interrupt(escalation.model_dump()))
+        return _apply_decision(decision, state)
+
+    def route_after_approval(state: GraphState) -> str:
+        # A take-over decision sets the result directly; skip the agents and go
+        # straight to recording the run. Every other decision runs the plan.
+        return "remember" if state.get("result") is not None else "execute"
 
     def execute_node(state: GraphState) -> GraphState:
         plan = state["plan"]
@@ -127,7 +159,7 @@ def build_graph(
     graph.add_edge(START, "retrieve")
     graph.add_edge("retrieve", "plan")
     graph.add_edge("plan", "approval")
-    graph.add_edge("approval", "execute")
+    graph.add_conditional_edges("approval", route_after_approval, ["execute", "remember"])
     graph.add_edge("execute", "review")
     graph.add_conditional_edges("review", route_after_review, ["execute", "synthesize"])
     graph.add_edge("synthesize", "remember")

@@ -85,5 +85,5 @@ def test_run_pauses_at_approval_and_resumes_from_fresh_graph(tmp_path: Path) -> 
         graph2 = build_graph(
             CannedProvider(_plan()), _registry(), NullMemoryStore(), checkpointer=saver2
         )
-        final = graph2.invoke(Command(resume="approved"), config)
+        final = graph2.invoke(Command(resume={"kind": "approve"}), config)
         assert final.get("result")

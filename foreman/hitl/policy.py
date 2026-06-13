@@ -19,11 +19,14 @@ When several apply, the most blocking one wins; precedence is the order above.
 from __future__ import annotations
 
 from enum import StrEnum
+from typing import TYPE_CHECKING
 
 from pydantic import BaseModel, Field
 
-from foreman.graph.state import GraphState
 from foreman.schemas import Plan, SpecialistOutput, Task, TaskMemory
+
+if TYPE_CHECKING:
+    from foreman.graph.state import GraphState
 
 
 class ApprovalLevel(StrEnum):
