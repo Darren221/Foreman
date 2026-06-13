@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from foreman.graph.state import GraphState
 from foreman.hitl import ApprovalLevel, Escalation, EscalationPolicy, EscalationTrigger
+from foreman.hitl.policy import Stage
 from foreman.schemas import (
     Plan,
     ReviewResult,
@@ -114,6 +115,32 @@ def test_escalation_carries_a_complete_context_packet() -> None:
     assert esc.memories == [memory]
     assert esc.proposed_action
     assert esc.reason
+
+
+def test_pre_execution_stage_ignores_post_review_triggers() -> None:
+    # Retry-exhaustion is a post-review concern; the pre-execution gate (run
+    # before any work) must not fire on it.
+    state = _state(
+        review=ReviewResult(passed=False, score=0.3, feedback="weak"), attempts=2
+    )
+    assert EscalationPolicy().evaluate(state, stage=Stage.PRE_EXECUTION) is None
+
+
+def test_post_review_stage_sees_retry_exhaustion_despite_a_pre_execution_trigger() -> None:
+    # A sensitive task already handled at the pre-execution gate must not mask the
+    # retry-exhausted take-over at the post-review gate — this is the precedence
+    # bug the per-stage scoping exists to prevent.
+    esc = EscalationPolicy().evaluate(
+        _state(
+            task=Task(description="x", sensitive=True),
+            review=ReviewResult(passed=False, score=0.3, feedback="weak"),
+            attempts=2,
+        ),
+        stage=Stage.POST_REVIEW,
+    )
+    assert esc is not None
+    assert esc.trigger is EscalationTrigger.RETRY_EXHAUSTED
+    assert esc.level is ApprovalLevel.TAKE_OVER
 
 
 def test_most_severe_trigger_wins_when_several_apply() -> None:

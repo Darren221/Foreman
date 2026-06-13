@@ -48,6 +48,26 @@ class EscalationTrigger(StrEnum):
     LOW_REVIEW_SCORE = "low_review_score"
 
 
+class Stage(StrEnum):
+    """Where in the pipeline a trigger is checked. Some triggers only make sense
+    before any work runs (review the plan); others only after (the work is done
+    but the outcome is concerning). Scoping evaluation by stage stops a still-true
+    pre-execution trigger from masking a post-review one at the later gate.
+    """
+
+    PRE_EXECUTION = "pre_execution"  # after planning, before execution
+    POST_REVIEW = "post_review"  # after review, before synthesis
+
+
+_TRIGGER_STAGE: dict[EscalationTrigger, Stage] = {
+    EscalationTrigger.SENSITIVE: Stage.PRE_EXECUTION,
+    EscalationTrigger.REQUIRE_APPROVAL: Stage.PRE_EXECUTION,
+    EscalationTrigger.LOW_CONFIDENCE: Stage.PRE_EXECUTION,
+    EscalationTrigger.RETRY_EXHAUSTED: Stage.POST_REVIEW,
+    EscalationTrigger.LOW_REVIEW_SCORE: Stage.POST_REVIEW,
+}
+
+
 class Escalation(BaseModel):
     """A request for human input, with everything the operator needs to decide."""
 
@@ -80,13 +100,22 @@ class EscalationPolicy:
         self._review_floor = review_floor
         self._max_attempts = max_attempts
 
-    def evaluate(self, state: GraphState) -> Escalation | None:
+    def evaluate(self, state: GraphState, stage: Stage | None = None) -> Escalation | None:
+        """Return the most pressing escalation for `state`, or None.
+
+        With no `stage`, all five triggers are considered (the full classifier);
+        the graph passes a stage so each gate only fires its own triggers. Checks
+        run in descending severity, so the first match is the most blocking one.
+        """
         task = state["task"]
         plan = state.get("plan")
         review = state.get("review")
         attempts = state.get("attempts", 0)
 
-        if task.sensitive:
+        def fires(trigger: EscalationTrigger) -> bool:
+            return stage is None or _TRIGGER_STAGE[trigger] is stage
+
+        if fires(EscalationTrigger.SENSITIVE) and task.sensitive:
             return self._build(
                 state,
                 EscalationTrigger.SENSITIVE,
@@ -95,7 +124,12 @@ class EscalationPolicy:
                 "perform a sensitive operation",
             )
 
-        if review is not None and not review.passed and attempts >= self._max_attempts:
+        if (
+            fires(EscalationTrigger.RETRY_EXHAUSTED)
+            and review is not None
+            and not review.passed
+            and attempts >= self._max_attempts
+        ):
             return self._build(
                 state,
                 EscalationTrigger.RETRY_EXHAUSTED,
@@ -104,7 +138,7 @@ class EscalationPolicy:
                 "deliver a best-effort result after exhausting retries",
             )
 
-        if task.require_approval:
+        if fires(EscalationTrigger.REQUIRE_APPROVAL) and task.require_approval:
             return self._build(
                 state,
                 EscalationTrigger.REQUIRE_APPROVAL,
@@ -113,7 +147,11 @@ class EscalationPolicy:
                 self._execute_action(plan),
             )
 
-        if plan is not None and plan.confidence < self._confidence_threshold:
+        if (
+            fires(EscalationTrigger.LOW_CONFIDENCE)
+            and plan is not None
+            and plan.confidence < self._confidence_threshold
+        ):
             return self._build(
                 state,
                 EscalationTrigger.LOW_CONFIDENCE,
@@ -123,7 +161,12 @@ class EscalationPolicy:
                 self._execute_action(plan),
             )
 
-        if review is not None and review.passed and review.score < self._review_floor:
+        if (
+            fires(EscalationTrigger.LOW_REVIEW_SCORE)
+            and review is not None
+            and review.passed
+            and review.score < self._review_floor
+        ):
             return self._build(
                 state,
                 EscalationTrigger.LOW_REVIEW_SCORE,

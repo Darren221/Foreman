@@ -1,11 +1,14 @@
 """Assembles the agent pipeline as a LangGraph state machine.
 
-The pipeline runs retrieve -> plan -> execute -> review -> synthesize -> remember.
-`retrieve` recalls similar past tasks to inform planning; `remember` stores a
-memory of this run. The review node feeds a conditional edge: a passing verdict
-goes to synthesis, a failing one routes back to execute (with the reviewer's
-feedback) until a retry cap, after which the pipeline proceeds rather than
-looping forever. A specialist failure is captured as output rather than crashing.
+The pipeline runs retrieve -> plan -> approval -> execute -> review ->
+post_review -> synthesize -> remember. `retrieve` recalls similar past tasks to
+inform planning; `remember` stores a memory of this run. Two human-in-the-loop
+gates bracket the work: `approval` (before execution) and `post_review` (after
+review); each pauses only when the escalation policy says so. The review node
+feeds a conditional edge: a passing verdict moves on to the post-review gate, a
+failing one routes back to execute (with the reviewer's feedback) until a retry
+cap, after which the pipeline proceeds rather than looping forever. A specialist
+failure is captured as output rather than crashing.
 """
 
 from __future__ import annotations
@@ -17,7 +20,7 @@ from langgraph.types import interrupt
 
 from foreman.agents import Researcher, Reviewer, Supervisor
 from foreman.graph.state import GraphState
-from foreman.hitl.policy import ApprovalLevel, EscalationPolicy
+from foreman.hitl.policy import ApprovalLevel, EscalationPolicy, Stage
 from foreman.hitl.queue import Decision, DecisionKind
 from foreman.llm.base import LLMProvider
 from foreman.memory import MemoryStore
@@ -64,6 +67,10 @@ def build_graph(
     researcher = Researcher(registry, provider)
     reviewer = Reviewer(provider)
     policy = policy or EscalationPolicy()
+    # The gates can only pause if there's somewhere to pause *to*. With no
+    # checkpointer there's no human channel, so the gates are inert and the
+    # pipeline runs autonomously (degrading to best-effort at the retry cap).
+    human_in_loop = checkpointer is not None
 
     def retrieve_node(state: GraphState) -> GraphState:
         memories = memory_store.recall(state["task"].description)
@@ -78,7 +85,9 @@ def build_graph(
         # policy decides whether to pause; a clean run produces no escalation and
         # passes straight through, so the default pipeline is unchanged. When it
         # does pause, the resume value is the human's Decision, applied below.
-        escalation = policy.evaluate(state)
+        if not human_in_loop:
+            return {}
+        escalation = policy.evaluate(state, stage=Stage.PRE_EXECUTION)
         if escalation is None or escalation.level is ApprovalLevel.NOTIFY:
             return {}
         decision = Decision.model_validate(interrupt(escalation.model_dump()))
@@ -125,8 +134,24 @@ def build_graph(
         review = state["review"]
         assert review is not None
         if review.passed or state.get("attempts", 0) >= MAX_ATTEMPTS:
-            return "synthesize"
+            return "post_review"
         return "execute"
+
+    def post_review_node(state: GraphState) -> GraphState:
+        # Second human-in-the-loop gate, after the work is reviewed. It catches
+        # the outcome-based triggers: a TAKE_OVER when retries are exhausted (the
+        # human supplies the result), or a non-blocking NOTIFY on a marginal pass.
+        if not human_in_loop:
+            return {}
+        escalation = policy.evaluate(state, stage=Stage.POST_REVIEW)
+        if escalation is None or escalation.level is ApprovalLevel.NOTIFY:
+            return {}
+        decision = Decision.model_validate(interrupt(escalation.model_dump()))
+        return _apply_decision(decision, state)
+
+    def route_after_post_review(state: GraphState) -> str:
+        # A take-over supplies the result outright; otherwise synthesise it.
+        return "remember" if state.get("result") is not None else "synthesize"
 
     def synthesize_node(state: GraphState) -> GraphState:
         outputs = state.get("outputs") or []
@@ -153,6 +178,7 @@ def build_graph(
     graph.add_node("approval", approval_node)
     graph.add_node("execute", execute_node)
     graph.add_node("review", review_node)
+    graph.add_node("post_review", post_review_node)
     graph.add_node("synthesize", synthesize_node)
     graph.add_node("remember", remember_node)
 
@@ -161,7 +187,8 @@ def build_graph(
     graph.add_edge("plan", "approval")
     graph.add_conditional_edges("approval", route_after_approval, ["execute", "remember"])
     graph.add_edge("execute", "review")
-    graph.add_conditional_edges("review", route_after_review, ["execute", "synthesize"])
+    graph.add_conditional_edges("review", route_after_review, ["execute", "post_review"])
+    graph.add_conditional_edges("post_review", route_after_post_review, ["synthesize", "remember"])
     graph.add_edge("synthesize", "remember")
     graph.add_edge("remember", END)
 
