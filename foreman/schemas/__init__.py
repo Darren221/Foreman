@@ -36,6 +36,8 @@ class Task(BaseModel):
 
     id: str = Field(default_factory=_new_id)
     description: str
+    require_approval: bool = False
+    sensitive: bool = False
 
 
 class Subtask(BaseModel):
@@ -51,10 +53,16 @@ class Subtask(BaseModel):
 
 
 class Plan(BaseModel):
-    """An ordered, dependency-aware decomposition of a task into subtasks."""
+    """An ordered, dependency-aware decomposition of a task into subtasks.
+
+    `confidence` is the supervisor's self-reported certainty in the plan (0–1).
+    It defaults high so a plan that omits it doesn't spuriously escalate; a low
+    value is one of the human-in-the-loop escalation triggers.
+    """
 
     task_id: str
     subtasks: list[Subtask]
+    confidence: float = Field(default=1.0, ge=0.0, le=1.0)
 
     @model_validator(mode="after")
     def _check_dependencies(self) -> Plan:
