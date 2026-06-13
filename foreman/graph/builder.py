@@ -13,22 +13,34 @@ failure is captured as output rather than crashing.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import Any, cast
 
 from langgraph.graph import END, START, StateGraph
 from langgraph.types import interrupt
+from opentelemetry import trace
 
 from foreman.agents import Researcher, Reviewer, Supervisor
 from foreman.graph.state import GraphState
-from foreman.hitl.policy import ApprovalLevel, EscalationPolicy, Stage
+from foreman.hitl.policy import ApprovalLevel, Escalation, EscalationPolicy, Stage
 from foreman.hitl.queue import Decision, DecisionKind
 from foreman.llm.base import LLMProvider
 from foreman.memory import MemoryStore
+from foreman.observability import NoOpTracer, Tracer, TracingProvider
 from foreman.schemas import ReviewResult, SpecialistOutput, Task, TaskMemory
 from foreman.tools import ToolRegistry
 
 MAX_ATTEMPTS = 2
 _RESULT_SNIPPET_LEN = 500
+
+
+def _record_escalation_event(escalation: Escalation) -> None:
+    # Attach the escalation to the active node span as an event. Reads the current
+    # span from OTel context, so it nests correctly and no-ops when untraced.
+    trace.get_current_span().add_event(
+        "escalation",
+        {"foreman.trigger": escalation.trigger.value, "foreman.level": escalation.level.value},
+    )
 
 
 def _apply_decision(decision: Decision, state: GraphState) -> GraphState:
@@ -57,16 +69,23 @@ def build_graph(
     memory_store: MemoryStore,
     checkpointer: Any = None,
     policy: EscalationPolicy | None = None,
+    tracer: Tracer | None = None,
 ) -> Any:
     """Wire the nodes into a compiled graph. `provider`, `registry`, and
     `memory_store` are the dependencies the nodes need. A `checkpointer` enables
     durable pause/resume (required for the human-in-the-loop interrupt); `policy`
-    decides when that interrupt fires (defaults to the standard thresholds)."""
+    decides when that interrupt fires (defaults to the standard thresholds); a
+    `tracer` records a span per node (no-op by default)."""
 
-    supervisor = Supervisor(provider)
-    researcher = Researcher(registry, provider)
-    reviewer = Reviewer(provider)
     policy = policy or EscalationPolicy()
+    tracer = tracer or NoOpTracer()
+    # Instrument the dependencies: llm spans come from the wrapped provider, tool
+    # spans from the registry. No-op tracer -> no spans, no behaviour change.
+    traced_provider = TracingProvider(provider, tracer)
+    registry.tracer = tracer
+    supervisor = Supervisor(traced_provider)
+    researcher = Researcher(registry, traced_provider)
+    reviewer = Reviewer(traced_provider)
     # The gates can only pause if there's somewhere to pause *to*. With no
     # checkpointer there's no human channel, so the gates are inert and the
     # pipeline runs autonomously (degrading to best-effort at the retry cap).
@@ -90,6 +109,7 @@ def build_graph(
         escalation = policy.evaluate(state, stage=Stage.PRE_EXECUTION)
         if escalation is None or escalation.level is ApprovalLevel.NOTIFY:
             return {}
+        _record_escalation_event(escalation)
         decision = Decision.model_validate(interrupt(escalation.model_dump()))
         return _apply_decision(decision, state)
 
@@ -146,6 +166,7 @@ def build_graph(
         escalation = policy.evaluate(state, stage=Stage.POST_REVIEW)
         if escalation is None or escalation.level is ApprovalLevel.NOTIFY:
             return {}
+        _record_escalation_event(escalation)
         decision = Decision.model_validate(interrupt(escalation.model_dump()))
         return _apply_decision(decision, state)
 
@@ -172,15 +193,25 @@ def build_graph(
         memory_store.remember(memory)
         return {}
 
+    def traced(name: str, fn: Callable[[GraphState], GraphState]) -> Any:
+        # Wrap a node so each execution is a `node:<name>` span, nested under the
+        # run span via the tracer's context. No-op tracer -> no overhead. Returns
+        # Any: LangGraph's add_node overloads accept a concrete callable here.
+        def run(state: GraphState) -> GraphState:
+            with tracer.span(f"node:{name}", kind="node"):
+                return fn(state)
+
+        return run
+
     graph = StateGraph(GraphState)
-    graph.add_node("retrieve", retrieve_node)
-    graph.add_node("plan", plan_node)
-    graph.add_node("approval", approval_node)
-    graph.add_node("execute", execute_node)
-    graph.add_node("review", review_node)
-    graph.add_node("post_review", post_review_node)
-    graph.add_node("synthesize", synthesize_node)
-    graph.add_node("remember", remember_node)
+    graph.add_node("retrieve", traced("retrieve", retrieve_node))
+    graph.add_node("plan", traced("plan", plan_node))
+    graph.add_node("approval", traced("approval", approval_node))
+    graph.add_node("execute", traced("execute", execute_node))
+    graph.add_node("review", traced("review", review_node))
+    graph.add_node("post_review", traced("post_review", post_review_node))
+    graph.add_node("synthesize", traced("synthesize", synthesize_node))
+    graph.add_node("remember", traced("remember", remember_node))
 
     graph.add_edge(START, "retrieve")
     graph.add_edge("retrieve", "plan")
@@ -200,11 +231,13 @@ def run_task(
     task: Task,
     registry: ToolRegistry | None = None,
     memory_store: MemoryStore | None = None,
+    tracer: Tracer | None = None,
 ) -> GraphState:
     """Run a task through the compiled graph and return the final state.
 
     Dependencies can be injected (tests pass fakes); otherwise the defaults are
-    built from settings.
+    built from settings. A `tracer` opens the root run span the node spans nest
+    under (no-op by default).
     """
     if registry is None or memory_store is None:
         from foreman.config import Settings
@@ -214,5 +247,7 @@ def run_task(
         settings = Settings()
         registry = registry or build_default_registry(settings)
         memory_store = memory_store or build_default_memory_store(settings)
-    graph = build_graph(provider, registry, memory_store)
-    return cast(GraphState, graph.invoke({"task": task}))
+    tracer = tracer or NoOpTracer()
+    graph = build_graph(provider, registry, memory_store, tracer=tracer)
+    with tracer.start_run(task.id, task.description):
+        return cast(GraphState, graph.invoke({"task": task}))
