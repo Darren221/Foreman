@@ -12,6 +12,7 @@ import os
 from foreman.observability.cost import CostLine, RunCost, cost_of, summarize
 from foreman.observability.exporter import SqliteSpanExporter
 from foreman.observability.instrument import TracingProvider
+from foreman.observability.replay import ForkResult, RunComparison, compare_runs, fork_run
 from foreman.observability.store import RunSummary, SpanNode, SpanRecord, TraceStore
 from foreman.observability.tracer import NoOpTracer, OTelTracer, Tracer
 
@@ -22,8 +23,10 @@ os.environ.setdefault("OTEL_SEMCONV_STABILITY_OPT_IN", "gen_ai_latest_experiment
 
 __all__ = [
     "CostLine",
+    "ForkResult",
     "NoOpTracer",
     "OTelTracer",
+    "RunComparison",
     "RunCost",
     "RunSummary",
     "SpanNode",
@@ -32,6 +35,8 @@ __all__ = [
     "TraceStore",
     "Tracer",
     "TracingProvider",
+    "compare_runs",
     "cost_of",
+    "fork_run",
     "summarize",
 ]
