@@ -30,6 +30,7 @@ class Settings(BaseSettings):
     memory_path: Path = Path("./data/memory")
     checkpoint_path: Path = Path("./data/checkpoints.sqlite")
     approval_path: Path = Path("./data/approvals.sqlite")
+    trace_path: Path = Path("./data/traces.sqlite")
 
 
 __all__ = ["Settings", "ProviderName"]
