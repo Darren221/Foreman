@@ -37,9 +37,10 @@ pip install -e ".[ui]"
 streamlit run foreman/ui/review.py
 ```
 
-Every run can be traced with OpenTelemetry; the trace explorer walks the recorded
-span tree (per-node latency, cost, and the LLM prompt/response):
+Pass `--trace` to record an OpenTelemetry trace of a run; the trace explorer then
+walks the recorded span tree (per-node latency, cost, and the LLM prompt/response):
 
 ```bash
+foreman run --trace "Research the history of the bicycle"
 streamlit run foreman/ui/explorer.py
 ```

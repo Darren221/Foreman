@@ -25,7 +25,7 @@ from foreman.tools import build_default_registry
 from foreman.ui.wiring import available_decisions, build_decision, submit_decision
 
 
-@st.cache_resource  # type: ignore[untyped-decorator]  # streamlit is untyped here
+@st.cache_resource  # type: ignore[untyped-decorator, unused-ignore]  # untyped only when streamlit absent
 def _runner_and_queue() -> tuple[Runner, ApprovalQueue]:
     """Build the runner and queue once and reuse them across reruns. The queue
     and checkpointer both point at the SQLite files the headless runner wrote, so
