@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import os
 
+from foreman.observability.cost import CostLine, RunCost, cost_of, summarize
 from foreman.observability.exporter import SqliteSpanExporter
 from foreman.observability.instrument import TracingProvider
 from foreman.observability.store import RunSummary, SpanNode, SpanRecord, TraceStore
@@ -20,8 +21,10 @@ from foreman.observability.tracer import NoOpTracer, OTelTracer, Tracer
 os.environ.setdefault("OTEL_SEMCONV_STABILITY_OPT_IN", "gen_ai_latest_experimental")
 
 __all__ = [
+    "CostLine",
     "NoOpTracer",
     "OTelTracer",
+    "RunCost",
     "RunSummary",
     "SpanNode",
     "SpanRecord",
@@ -29,4 +32,6 @@ __all__ = [
     "TraceStore",
     "Tracer",
     "TracingProvider",
+    "cost_of",
+    "summarize",
 ]

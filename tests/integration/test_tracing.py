@@ -12,7 +12,7 @@ from langgraph.checkpoint.sqlite import SqliteSaver
 from foreman.graph import run_task
 from foreman.graph.builder import build_graph
 from foreman.llm.base import LLMProvider, T, Usage
-from foreman.observability import OTelTracer, SpanNode, TraceStore
+from foreman.observability import OTelTracer, SpanNode, TraceStore, summarize
 from foreman.schemas import (
     Plan,
     ResearchFindings,
@@ -47,7 +47,10 @@ class UsageProvider(CannedProvider):
     surfaces it, so llm spans can carry `gen_ai.*` attributes."""
 
     name = "usage"
-    model = "fake-model"
+
+    def __init__(self, plan: Plan, model: str = "fake-model") -> None:
+        super().__init__(plan)
+        self.model = model
 
     def structured_complete(self, prompt: str, schema: type[T]) -> T:
         self.last_usage = Usage(input_tokens=11, output_tokens=7)
@@ -144,6 +147,26 @@ def test_tool_and_llm_spans_nest_under_their_nodes(tmp_path: Path) -> None:
     assert llm_spans  # the supervisor/researcher/reviewer calls are traced
     assert all(s.span.attributes.get("gen_ai.request.model") == "fake-model" for s in llm_spans)
     assert any(s.span.attributes.get("gen_ai.usage.input_tokens") == 11 for s in llm_spans)
+    store.close()
+
+
+def test_summarize_costs_a_real_recorded_run(tmp_path: Path) -> None:
+    store = TraceStore(tmp_path / "traces.sqlite")
+    run_task(
+        UsageProvider(_plan(), model="gpt-4o"),
+        Task(description="research the bicycle"),
+        registry=_registry(),
+        memory_store=NullMemoryStore(),
+        tracer=OTelTracer(store),
+    )
+
+    root = store.get_trace(store.list_runs()[0].trace_id)
+    assert root is not None
+    cost = summarize(root)
+    assert cost.tool_calls == 1
+    assert cost.total.input_tokens > 0
+    assert cost.total.cost_usd > 0
+    assert "node:plan" in cost.by_agent
     store.close()
 
 
