@@ -28,3 +28,11 @@ pytest
 
 Copy `.env.example` to `.env` and fill in provider API keys before running
 against live models.
+
+When a task escalates for approval, an operator reviews and resolves it from the
+Streamlit queue:
+
+```bash
+pip install -e ".[ui]"
+streamlit run foreman/ui/review.py
+```

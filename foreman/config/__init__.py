@@ -29,6 +29,7 @@ class Settings(BaseSettings):
     embedding_model: str = "text-embedding-3-small"
     memory_path: Path = Path("./data/memory")
     checkpoint_path: Path = Path("./data/checkpoints.sqlite")
+    approval_path: Path = Path("./data/approvals.sqlite")
 
 
 __all__ = ["Settings", "ProviderName"]
