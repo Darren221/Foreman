@@ -21,6 +21,9 @@ from foreman.observability.store import TraceStore
 
 # Attribute key for our semantic span role (run/node/tool/llm/memory).
 KIND = "foreman.kind"
+# Captured LLM content (truncated) for the trace explorer to expand.
+PROMPT_ATTR = "foreman.prompt"
+RESPONSE_ATTR = "foreman.response"
 
 
 class Tracer(Protocol):

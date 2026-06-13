@@ -36,3 +36,10 @@ Streamlit queue:
 pip install -e ".[ui]"
 streamlit run foreman/ui/review.py
 ```
+
+Every run can be traced with OpenTelemetry; the trace explorer walks the recorded
+span tree (per-node latency, cost, and the LLM prompt/response):
+
+```bash
+streamlit run foreman/ui/explorer.py
+```

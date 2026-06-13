@@ -147,6 +147,9 @@ def test_tool_and_llm_spans_nest_under_their_nodes(tmp_path: Path) -> None:
     assert llm_spans  # the supervisor/researcher/reviewer calls are traced
     assert all(s.span.attributes.get("gen_ai.request.model") == "fake-model" for s in llm_spans)
     assert any(s.span.attributes.get("gen_ai.usage.input_tokens") == 11 for s in llm_spans)
+    # Prompt + response are captured for click-to-expand in the explorer.
+    assert all(s.span.attributes.get("foreman.prompt") for s in llm_spans)
+    assert all(s.span.attributes.get("foreman.response") for s in llm_spans)
     store.close()
 
 
