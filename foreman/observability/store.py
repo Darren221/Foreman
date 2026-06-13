@@ -30,6 +30,7 @@ class SpanRecord:
     end_ns: int
     status: str
     attributes: dict[str, Any] = field(default_factory=dict)
+    events: list[dict[str, Any]] = field(default_factory=list)
 
     @property
     def duration_ms(self) -> float:
@@ -72,7 +73,8 @@ class TraceStore:
                 start_ns   INTEGER NOT NULL,
                 end_ns     INTEGER NOT NULL,
                 status     TEXT NOT NULL,
-                attributes TEXT NOT NULL
+                attributes TEXT NOT NULL,
+                events     TEXT NOT NULL DEFAULT '[]'
             )
             """
         )
@@ -81,8 +83,9 @@ class TraceStore:
     def record_span(self, span: SpanRecord) -> None:
         self._conn.execute(
             "INSERT OR REPLACE INTO spans "
-            "(span_id, trace_id, parent_id, name, kind, start_ns, end_ns, status, attributes) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "(span_id, trace_id, parent_id, name, kind, start_ns, end_ns, status, "
+            "attributes, events) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 span.span_id,
                 span.trace_id,
@@ -93,6 +96,7 @@ class TraceStore:
                 span.end_ns,
                 span.status,
                 json.dumps(span.attributes),
+                json.dumps(span.events),
             ),
         )
         self._conn.commit()
@@ -146,4 +150,5 @@ class TraceStore:
             end_ns=row["end_ns"],
             status=row["status"],
             attributes=json.loads(row["attributes"]),
+            events=json.loads(row["events"]),
         )

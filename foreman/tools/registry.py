@@ -13,6 +13,7 @@ import time
 from dataclasses import dataclass
 from typing import Any
 
+from foreman.observability import NoOpTracer, Tracer
 from foreman.schemas import Specialist
 from foreman.tools.base import Tool
 
@@ -32,6 +33,8 @@ class ToolRegistry:
     def __init__(self) -> None:
         self._tools: dict[str, Tool] = {}
         self.invocations: list[ToolInvocation] = []
+        # Set by build_graph for a traced run; no-op otherwise.
+        self.tracer: Tracer = NoOpTracer()
 
     def register(self, tool: Tool) -> None:
         self._tools[tool.name] = tool
@@ -44,14 +47,16 @@ class ToolRegistry:
         if caller not in tool.allowed_specialists:
             raise ValueError(f"{caller.value} is not permitted to call tool '{name}'")
 
-        started = time.perf_counter()
-        try:
-            output = tool.run(**inputs)
-        except Exception as exc:
-            self._log(name, caller, inputs, None, started, success=False, error=str(exc))
-            raise
-        self._log(name, caller, inputs, output, started, success=True)
-        return output
+        span_attrs = {"foreman.caller": caller.value}
+        with self.tracer.span(f"tool:{name}", kind="tool", attributes=span_attrs):
+            started = time.perf_counter()
+            try:
+                output = tool.run(**inputs)
+            except Exception as exc:
+                self._log(name, caller, inputs, None, started, success=False, error=str(exc))
+                raise
+            self._log(name, caller, inputs, output, started, success=True)
+            return output
 
     def _log(
         self,

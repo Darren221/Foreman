@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from typing import Any, cast
 
-from foreman.llm.base import LLMProvider, T
+from foreman.llm.base import LLMProvider, T, Usage
 
 
 class OpenAIProvider(LLMProvider):
@@ -18,7 +18,7 @@ class OpenAIProvider(LLMProvider):
 
     def __init__(self, api_key: str, model: str) -> None:
         self._api_key = api_key
-        self._model = model
+        self.model = model
         self._client: Any = None
 
     def _ensure_client(self) -> Any:
@@ -31,10 +31,11 @@ class OpenAIProvider(LLMProvider):
     def structured_complete(self, prompt: str, schema: type[T]) -> T:
         client = self._ensure_client()
         completion = client.beta.chat.completions.parse(
-            model=self._model,
+            model=self.model,
             messages=[{"role": "user", "content": prompt}],
             response_format=schema,
         )
+        self.last_usage = _openai_usage(getattr(completion, "usage", None))
         parsed = completion.choices[0].message.parsed
         if parsed is None:
             raise ValueError("OpenAI returned no parseable structured output")
@@ -46,7 +47,7 @@ class AnthropicProvider(LLMProvider):
 
     def __init__(self, api_key: str, model: str) -> None:
         self._api_key = api_key
-        self._model = model
+        self.model = model
         self._client: Any = None
 
     def _ensure_client(self) -> Any:
@@ -67,13 +68,28 @@ class AnthropicProvider(LLMProvider):
             "input_schema": schema.model_json_schema(),
         }
         message = client.messages.create(
-            model=self._model,
+            model=self.model,
             max_tokens=4096,
             tools=[tool],
             tool_choice={"type": "tool", "name": "respond"},
             messages=[{"role": "user", "content": prompt}],
         )
+        usage = getattr(message, "usage", None)
+        if usage is not None:
+            self.last_usage = Usage(
+                input_tokens=getattr(usage, "input_tokens", 0) or 0,
+                output_tokens=getattr(usage, "output_tokens", 0) or 0,
+            )
         for block in message.content:
             if getattr(block, "type", None) == "tool_use":
                 return schema.model_validate(block.input)
         raise ValueError("Anthropic returned no tool_use block to parse")
+
+
+def _openai_usage(usage: Any) -> Usage | None:
+    if usage is None:
+        return None
+    return Usage(
+        input_tokens=getattr(usage, "prompt_tokens", 0) or 0,
+        output_tokens=getattr(usage, "completion_tokens", 0) or 0,
+    )

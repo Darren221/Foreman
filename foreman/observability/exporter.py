@@ -41,6 +41,10 @@ class SqliteSpanExporter(SpanExporter):
                     end_ns=span.end_time or 0,
                     status="error" if span.status.status_code is StatusCode.ERROR else "ok",
                     attributes=attributes,
+                    events=[
+                        {"name": event.name, "attributes": dict(event.attributes or {})}
+                        for event in span.events
+                    ],
                 )
             )
         return SpanExportResult.SUCCESS
