@@ -31,6 +31,8 @@ class Settings(BaseSettings):
     checkpoint_path: Path = Path("./data/checkpoints.sqlite")
     approval_path: Path = Path("./data/approvals.sqlite")
     trace_path: Path = Path("./data/traces.sqlite")
+    workspace_path: Path = Path("./data/workspace")
+    database_dsn: str | None = None
 
 
 __all__ = ["Settings", "ProviderName"]
