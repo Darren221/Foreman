@@ -1,7 +1,7 @@
 """The writer specialist: turn a subtask (and any feedback) into polished prose.
 
-LLM-only here; its file I/O tool is wired in Phase 5 C2 (the registry is held now
-so the tool slots in without changing the constructor).
+LLM-only for now. The file I/O tool is available in the registry (for persisting or
+passing artifacts); the registry is held so wiring it in is a constructor-free change.
 """
 
 from __future__ import annotations

@@ -119,6 +119,12 @@ class ResearchFindings(BaseModel):
     content: str
 
 
+class AnalysisCode(BaseModel):
+    """Python the analyst will run in the sandbox to compute its result."""
+
+    code: str
+
+
 class Synthesis(BaseModel):
     """The supervisor's final deliverable, composed from specialist outputs."""
 

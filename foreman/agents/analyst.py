@@ -1,23 +1,37 @@
-"""The analyst specialist: process and interpret data for a subtask.
+"""The analyst specialist: compute the answer by running code, then write it up.
 
-In this first cut it reasons over the subtask with the LLM. Its real power —
-sandboxed code execution and database queries — is wired in Phase 5 C2; the
-registry is held now so those tools slot in without changing the constructor.
+It mirrors the researcher's two-step shape — gather, then summarise — but its
+"gather" is *running code in the sandbox*: the LLM writes a short program, the
+`code_execution` tool runs it in a throwaway container, and the LLM writes up the
+findings grounded in the program's output (folding in any reviewer feedback).
 """
 
 from __future__ import annotations
 
 from foreman.llm.base import LLMProvider
-from foreman.schemas import ResearchFindings, Specialist, SpecialistOutput, Subtask
+from foreman.schemas import AnalysisCode, ResearchFindings, Specialist, SpecialistOutput, Subtask
 from foreman.tools import ToolRegistry
 
-_PROMPT = """\
-You are a data analyst. Analyse the subtask and produce clear, specific findings:
-extract the figures, relationships, and conclusions the task asks for. State any
-assumptions; do not invent data.
+_TOOL = "code_execution"
+
+_CODE_PROMPT = """\
+You are a data analyst. Write a short Python program that computes what the subtask
+asks for and prints the result. Use only the standard library; print the answer.
 
 Subtask: {description}
 Expected output: {expected_output}
+
+Reviewer feedback to address (if any): {feedback}
+"""
+
+_WRITEUP_PROMPT = """\
+Write up the analysis findings for the subtask, grounded in the program output
+below. State the result and what it means; be specific; do not invent numbers.
+
+Subtask: {description}
+
+Program output:
+{output}
 
 Reviewer feedback to address (if any): {feedback}
 """
@@ -31,10 +45,22 @@ class Analyst:
         self._provider = provider
 
     def execute(self, subtask: Subtask, feedback: str | None = None) -> SpecialistOutput:
-        prompt = _PROMPT.format(
-            description=subtask.description,
-            expected_output=subtask.expected_output,
-            feedback=feedback or "none",
+        code = self._provider.structured_complete(
+            _CODE_PROMPT.format(
+                description=subtask.description,
+                expected_output=subtask.expected_output,
+                feedback=feedback or "none",
+            ),
+            AnalysisCode,
+        ).code
+        result = self._registry.invoke(_TOOL, self.specialist, code=code)
+        output = result.get("stdout") or result.get("stderr") or "(no output)"
+        content = self._provider.structured_complete(
+            _WRITEUP_PROMPT.format(
+                description=subtask.description, output=output, feedback=feedback or "none"
+            ),
+            ResearchFindings,
+        ).content
+        return SpecialistOutput(
+            subtask_id=subtask.id, content=content, tools_used=[_TOOL], produced_by=self.specialist
         )
-        content = self._provider.structured_complete(prompt, ResearchFindings).content
-        return SpecialistOutput(subtask_id=subtask.id, content=content, produced_by=self.specialist)

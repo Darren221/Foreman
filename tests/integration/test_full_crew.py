@@ -8,6 +8,7 @@ from typing import Any
 from foreman.graph import run_task
 from foreman.llm.base import LLMProvider, T
 from foreman.schemas import (
+    AnalysisCode,
     Plan,
     ResearchFindings,
     ReviewResult,
@@ -16,7 +17,8 @@ from foreman.schemas import (
     Synthesis,
     Task,
 )
-from foreman.tools import ToolRegistry, WebSearchTool
+from foreman.tools import CodeExecutionTool, ToolRegistry, WebSearchTool
+from foreman.tools.code_exec import FakeSandbox
 from tests.support import NullMemoryStore
 
 
@@ -27,6 +29,8 @@ class CrewProvider(LLMProvider):
         self._plan = plan
 
     def structured_complete(self, prompt: str, schema: type[T]) -> T:
+        if schema is AnalysisCode:
+            return AnalysisCode(code="print(42)")  # type: ignore[return-value]
         if schema is ResearchFindings:
             return ResearchFindings(content="findings")  # type: ignore[return-value]
         if schema is ReviewResult:
@@ -44,6 +48,7 @@ class FakeBackend:
 def _registry() -> ToolRegistry:
     reg = ToolRegistry()
     reg.register(WebSearchTool(FakeBackend()))
+    reg.register(CodeExecutionTool(FakeSandbox(stdout="42\n")))
     return reg
 
 
@@ -84,6 +89,8 @@ class WeakS2Provider(LLMProvider):
         self._s2_reviews = 0
 
     def structured_complete(self, prompt: str, schema: type[T]) -> T:
+        if schema is AnalysisCode:
+            return AnalysisCode(code="print(1)")  # type: ignore[return-value]
         if schema is ResearchFindings:
             self.findings_calls += 1
             return ResearchFindings(content=_between(prompt, "Subtask: ", "\n"))  # type: ignore[return-value]
