@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from foreman.config import Settings
+from foreman.tools.api_call import ApiCallTool, UrllibBackend
 from foreman.tools.code_exec import CodeExecutionTool, DockerSandbox
 from foreman.tools.database import DatabaseQueryTool, PostgresBackend
 from foreman.tools.files import FileTool
@@ -16,4 +17,5 @@ def build_default_registry(settings: Settings) -> ToolRegistry:
     registry.register(CodeExecutionTool(DockerSandbox()))
     registry.register(FileTool(settings.workspace_path))
     registry.register(DatabaseQueryTool(PostgresBackend(settings.database_dsn or "")))
+    registry.register(ApiCallTool(UrllibBackend()))
     return registry

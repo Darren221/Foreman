@@ -10,8 +10,8 @@ from foreman.tools import build_default_registry
 def test_default_registry_has_the_crew_tools() -> None:
     registry = build_default_registry(Settings(_env_file=None))  # type: ignore[call-arg]
 
-    names = {registry.get(n).name for n in ("web_search", "code_execution", "file_io", "db_query")}
-    assert names == {"web_search", "code_execution", "file_io", "db_query"}
+    expected = {"web_search", "code_execution", "file_io", "db_query", "api_call"}
+    assert {registry.get(n).name for n in expected} == expected
 
     assert registry.get("code_execution").allowed_specialists == frozenset({Specialist.ANALYST})
     assert registry.get("db_query").allowed_specialists == frozenset({Specialist.ANALYST})

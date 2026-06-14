@@ -1,5 +1,6 @@
 """Tool framework: the registry, the Tool interface, and concrete tools."""
 
+from foreman.tools.api_call import ApiCallTool
 from foreman.tools.base import Tool
 from foreman.tools.code_exec import CodeExecutionTool
 from foreman.tools.database import DatabaseQueryTool
@@ -16,5 +17,6 @@ __all__ = [
     "CodeExecutionTool",
     "FileTool",
     "DatabaseQueryTool",
+    "ApiCallTool",
     "build_default_registry",
 ]
