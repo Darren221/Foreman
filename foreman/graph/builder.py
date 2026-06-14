@@ -58,9 +58,15 @@ def _apply_decision(decision: Decision, state: GraphState) -> GraphState:
             "review": ReviewResult(passed=True, score=1.0, feedback="human take-over"),
         }
     if decision.kind is DecisionKind.MODIFY and decision.plan is not None:
-        return {"plan": decision.plan}
+        # New plan: drop the per-subtask reviews so every new subtask re-runs.
+        return {"plan": decision.plan, "subtask_reviews": {}}
     if decision.kind is DecisionKind.REJECT:
-        return {"review": ReviewResult(passed=False, score=0.0, feedback=decision.feedback)}
+        # Human reject: re-run the whole plan with the human's feedback (the
+        # cleared per-subtask reviews send execute down the aggregate-feedback path).
+        return {
+            "review": ReviewResult(passed=False, score=0.0, feedback=decision.feedback),
+            "subtask_reviews": {},
+        }
     return {}
 
 
@@ -126,35 +132,50 @@ def build_graph(
     def execute_node(state: GraphState) -> GraphState:
         plan = state["plan"]
         assert plan is not None
+        # Per-output retry: keep a subtask's output if its last review passed; only
+        # re-run the ones that failed (or that never ran). Each re-run gets its own
+        # subtask's feedback; a human reject (no per-subtask reviews) falls back to
+        # the aggregate review feedback, re-running everything.
+        reviews = state.get("subtask_reviews") or {}
         review = state.get("review")
-        feedback = review.feedback if review and not review.passed else None
-        outputs = []
+        aggregate_feedback = review.feedback if review and not review.passed else None
+        outputs = {o.subtask_id: o for o in (state.get("outputs") or [])}
         for subtask in plan.subtasks:
+            verdict = reviews.get(subtask.id)
+            if verdict is not None and verdict.passed:
+                continue  # already good — keep its output, don't re-run
+            feedback = verdict.feedback if verdict is not None else aggregate_feedback
             try:
                 agent = specialists[subtask.assigned_specialist]
-                outputs.append(agent.execute(subtask, feedback=feedback))
+                outputs[subtask.id] = agent.execute(subtask, feedback=feedback)
             except Exception as exc:
                 # Degrade gracefully: capture the failure as output so the
                 # reviewer can reject it and the pipeline keeps moving.
-                outputs.append(
-                    SpecialistOutput(
-                        subtask_id=subtask.id,
-                        content=f"[execution failed: {exc}]",
-                    )
+                outputs[subtask.id] = SpecialistOutput(
+                    subtask_id=subtask.id,
+                    content=f"[execution failed: {exc}]",
+                    produced_by=subtask.assigned_specialist,
                 )
-        return {"outputs": outputs}
+        return {"outputs": [outputs[s.id] for s in plan.subtasks]}
 
     def review_node(state: GraphState) -> GraphState:
         plan = state["plan"]
         assert plan is not None
         subtasks = {s.id: s for s in plan.subtasks}
         attempts = state.get("attempts", 0) + 1
-        verdict = ReviewResult(passed=True, score=1.0, feedback="")
-        for output in state.get("outputs") or []:
-            verdict = reviewer.review(subtasks[output.subtask_id], output)
-            if not verdict.passed:
-                break
-        return {"review": verdict, "attempts": attempts}
+        # Judge every output, not just up to the first weak one, so the next
+        # execute can retry only the subtasks that actually failed.
+        reviews = {
+            output.subtask_id: reviewer.review(subtasks[output.subtask_id], output)
+            for output in state.get("outputs") or []
+        }
+        verdicts = list(reviews.values())
+        aggregate = ReviewResult(
+            passed=all(v.passed for v in verdicts),
+            score=min((v.score for v in verdicts), default=1.0),
+            feedback=" | ".join(v.feedback for v in verdicts if not v.passed),
+        )
+        return {"review": aggregate, "subtask_reviews": reviews, "attempts": attempts}
 
     def route_after_review(state: GraphState) -> str:
         review = state["review"]

@@ -18,5 +18,6 @@ class GraphState(TypedDict, total=False):
     plan: Plan | None
     outputs: list[SpecialistOutput]
     review: ReviewResult | None
+    subtask_reviews: dict[str, ReviewResult]
     attempts: int
     result: str | None
