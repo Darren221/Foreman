@@ -51,3 +51,8 @@ ignore_missing_imports = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+markers = [
+    "requires_docker: needs a working Docker daemon (run under docker-compose)",
+    "requires_postgres: needs a Postgres instance",
+    "requires_redis: needs a Redis instance",
+]
