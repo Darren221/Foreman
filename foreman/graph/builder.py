@@ -16,20 +16,23 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Any, cast
 
+from celery import group
 from langgraph.graph import END, START, StateGraph
 from langgraph.types import interrupt
 from opentelemetry import trace
+from opentelemetry.propagate import inject
 
-from foreman.agents import Analyst, Researcher, Reviewer, Supervisor, Writer
-from foreman.agents.base import SpecialistAgent
+from foreman.agents import Reviewer, Supervisor
 from foreman.graph.state import GraphState
 from foreman.hitl.policy import ApprovalLevel, Escalation, EscalationPolicy, Stage
 from foreman.hitl.queue import Decision, DecisionKind
 from foreman.llm.base import LLMProvider
 from foreman.memory import MemoryStore
 from foreman.observability import NoOpTracer, Tracer, TracingProvider
-from foreman.schemas import ReviewResult, Specialist, SpecialistOutput, Task, TaskMemory
+from foreman.schemas import ReviewResult, SpecialistOutput, Subtask, Task, TaskMemory
 from foreman.tools import ToolRegistry
+from foreman.workers import celery_app as _celery_app  # noqa: F401  (build + default the app)
+from foreman.workers.tasks import run_specialist, use_worker_context
 
 MAX_ATTEMPTS = 2
 _RESULT_SNIPPET_LEN = 500
@@ -70,6 +73,19 @@ def _apply_decision(decision: Decision, state: GraphState) -> GraphState:
     return {}
 
 
+def _output_from_result(subtask: Subtask, result: Any) -> SpecialistOutput:
+    """Map a worker result into a `SpecialistOutput`. A gather with `propagate=False`
+    yields the output JSON for a success and the exception for a failure; we degrade a
+    failure into a failure-output so the reviewer can reject it and the run moves on."""
+    if isinstance(result, str):
+        return SpecialistOutput.model_validate_json(result)
+    return SpecialistOutput(
+        subtask_id=subtask.id,
+        content=f"[execution failed: {result}]",
+        produced_by=subtask.assigned_specialist,
+    )
+
+
 def build_graph(
     provider: LLMProvider,
     registry: ToolRegistry,
@@ -92,11 +108,6 @@ def build_graph(
     registry.tracer = tracer
     supervisor = Supervisor(traced_provider)
     reviewer = Reviewer(traced_provider)
-    specialists: dict[Specialist, SpecialistAgent] = {
-        Specialist.RESEARCHER: Researcher(registry, traced_provider),
-        Specialist.ANALYST: Analyst(registry, traced_provider),
-        Specialist.WRITER: Writer(registry, traced_provider),
-    }
     # The gates can only pause if there's somewhere to pause *to*. With no
     # checkpointer there's no human channel, so the gates are inert and the
     # pipeline runs autonomously (degrading to best-effort at the retry cap).
@@ -140,22 +151,49 @@ def build_graph(
         review = state.get("review")
         aggregate_feedback = review.feedback if review and not review.passed else None
         outputs = {o.subtask_id: o for o in (state.get("outputs") or [])}
-        for subtask in plan.subtasks:
+
+        def feedback_for(subtask: Subtask) -> str | None:
             verdict = reviews.get(subtask.id)
-            if verdict is not None and verdict.passed:
-                continue  # already good — keep its output, don't re-run
-            feedback = verdict.feedback if verdict is not None else aggregate_feedback
-            try:
-                agent = specialists[subtask.assigned_specialist]
-                outputs[subtask.id] = agent.execute(subtask, feedback=feedback)
-            except Exception as exc:
-                # Degrade gracefully: capture the failure as output so the
-                # reviewer can reject it and the pipeline keeps moving.
-                outputs[subtask.id] = SpecialistOutput(
-                    subtask_id=subtask.id,
-                    content=f"[execution failed: {exc}]",
-                    produced_by=subtask.assigned_specialist,
-                )
+            return verdict.feedback if verdict is not None else aggregate_feedback
+
+        # C-orchestrated fan-out: dispatch in dependency-ordered waves. `done` holds
+        # the subtasks whose outputs are available (kept-passing ones to start with);
+        # each wave is the subtasks still to run whose dependencies are all done. A
+        # wave fans out to the workers in parallel; we join it back into `outputs`,
+        # then its dependents become runnable. Workers stay stateless — `GraphState`
+        # (these outputs) bridges the waves, which is why no Redis store is needed.
+        remaining = [s for s in plan.subtasks if not (reviews.get(s.id) and reviews[s.id].passed)]
+        done = set(outputs)
+
+        # Only propagate a trace context when actually recording, so an untraced run
+        # doesn't spuriously start tracing in a remote worker.
+        traceparent: str | None = None
+        if trace.get_current_span().is_recording():
+            carrier: dict[str, str] = {}
+            inject(carrier)
+            traceparent = carrier.get("traceparent")
+
+        with use_worker_context(provider, registry, tracer):
+            while remaining:
+                wave = [s for s in remaining if all(d in done for d in s.dependencies)]
+                if not wave:
+                    break  # unsatisfiable deps — impossible for a validated DAG
+                signatures = [
+                    run_specialist.s(
+                        subtask.model_dump_json(),
+                        feedback_for(subtask),
+                        [outputs[dep].model_dump_json() for dep in subtask.dependencies],
+                        traceparent,
+                    )
+                    for subtask in wave
+                ]
+                results = group(signatures).apply_async().get(propagate=False)
+                for subtask, result in zip(wave, results, strict=True):
+                    outputs[subtask.id] = _output_from_result(subtask, result)
+                    done.add(subtask.id)
+                ran = {s.id for s in wave}
+                remaining = [s for s in remaining if s.id not in ran]
+
         return {"outputs": [outputs[s.id] for s in plan.subtasks]}
 
     def review_node(state: GraphState) -> GraphState:

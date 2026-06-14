@@ -31,6 +31,21 @@ def pytest_collection_modifyitems(
                 item.add_marker(pytest.mark.skip(reason=f"infra test; set {env}=1 to run"))
 
 
+@pytest.fixture(autouse=True)
+def _celery_eager() -> Iterator[None]:
+    """Run Celery tasks in-process for the offline suite — the graph fans specialists
+    out to Celery, so without eager mode it would block on a real broker. A
+    `requires_redis` test flips this off to exercise real workers."""
+    from foreman.workers.celery_app import app
+
+    previous = app.conf.task_always_eager
+    app.conf.task_always_eager = True
+    try:
+        yield
+    finally:
+        app.conf.task_always_eager = previous
+
+
 @pytest.fixture(
     params=[
         "sqlite",

@@ -8,6 +8,7 @@ can genuinely improve, not just repeat itself.
 
 from __future__ import annotations
 
+from foreman.agents.base import render_upstream
 from foreman.llm.base import LLMProvider
 from foreman.schemas import ResearchFindings, Specialist, SpecialistOutput, Subtask
 from foreman.tools import ToolRegistry
@@ -23,6 +24,9 @@ sources support. Do not invent facts beyond the sources.
 
 Subtask: {description}
 
+Upstream results from prior steps (for context):
+{upstream}
+
 Reviewer feedback to address (if any): {feedback}
 
 Search results:
@@ -37,18 +41,27 @@ class Researcher:
         self._registry = registry
         self._provider = provider
 
-    def execute(self, subtask: Subtask, feedback: str | None = None) -> SpecialistOutput:
+    def execute(
+        self,
+        subtask: Subtask,
+        feedback: str | None = None,
+        upstream: list[SpecialistOutput] | None = None,
+    ) -> SpecialistOutput:
         # The query is the topic only; reviewer feedback is handled at write-up
         # time, so it can never bloat the query past the provider's limit.
         query = subtask.description[:_MAX_QUERY_LEN]
         result = self._registry.invoke(_TOOL, self.specialist, query=query)
-        content = self._summarise(subtask, result.get("results", []), feedback)
+        content = self._summarise(subtask, result.get("results", []), feedback, upstream)
         return SpecialistOutput(
             subtask_id=subtask.id, content=content, tools_used=[_TOOL], produced_by=self.specialist
         )
 
     def _summarise(
-        self, subtask: Subtask, results: list[dict[str, object]], feedback: str | None
+        self,
+        subtask: Subtask,
+        results: list[dict[str, object]],
+        feedback: str | None,
+        upstream: list[SpecialistOutput] | None,
     ) -> str:
         if not results:
             return "No results found."
@@ -57,6 +70,7 @@ class Researcher:
         )
         prompt = _SUMMARY_PROMPT.format(
             description=subtask.description,
+            upstream=render_upstream(upstream),
             feedback=feedback or "none",
             sources=sources,
         )

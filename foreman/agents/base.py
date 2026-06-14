@@ -15,4 +15,21 @@ from foreman.schemas import Specialist, SpecialistOutput, Subtask
 class SpecialistAgent(Protocol):
     specialist: Specialist
 
-    def execute(self, subtask: Subtask, feedback: str | None = None) -> SpecialistOutput: ...
+    def execute(
+        self,
+        subtask: Subtask,
+        feedback: str | None = None,
+        upstream: list[SpecialistOutput] | None = None,
+    ) -> SpecialistOutput: ...
+
+
+def render_upstream(upstream: list[SpecialistOutput] | None) -> str:
+    """Render a subtask's dependency outputs as prompt context — its inputs.
+
+    C-orchestrated waves feed each subtask the outputs of the subtasks it depends
+    on; this turns them into a labelled block for the prompt. Empty -> "none"."""
+    if not upstream:
+        return "none"
+    return "\n\n".join(
+        f"[{o.produced_by.value if o.produced_by else 'unknown'}] {o.content}" for o in upstream
+    )

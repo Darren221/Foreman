@@ -5,6 +5,8 @@ from __future__ import annotations
 
 from typing import Any
 
+import pytest
+
 from foreman.graph import run_task
 from foreman.llm.base import LLMProvider, T
 from foreman.schemas import (
@@ -144,3 +146,82 @@ def test_each_subtask_runs_through_its_assigned_specialist() -> None:
     assert outputs["s1"].produced_by is Specialist.RESEARCHER
     assert outputs["s2"].produced_by is Specialist.ANALYST
     assert outputs["s3"].produced_by is Specialist.WRITER
+
+
+class UpstreamEchoProvider(LLMProvider):
+    """s1 (researcher) emits a marker; s2 (writer, depends on s1) reports whether it
+    received s1's output as upstream — which is only true if the wave ran s1 first and
+    injected its output into s2's payload."""
+
+    name = "upstream-echo"
+
+    def __init__(self, plan: Plan) -> None:
+        self._plan = plan
+
+    def structured_complete(self, prompt: str, schema: type[T]) -> T:
+        if schema is ResearchFindings:
+            if "You are a writer" in prompt:  # the dependent s2 subtask
+                seen = "MARKER_S1" in prompt
+                return ResearchFindings(content=f"s2_saw_s1={seen}")  # type: ignore[return-value]
+            return ResearchFindings(content="MARKER_S1")  # s1
+        if schema is ReviewResult:
+            return ReviewResult(passed=True, score=0.9, feedback="ok")  # type: ignore[return-value]
+        if schema is Synthesis:
+            return Synthesis(result="done")  # type: ignore[return-value]
+        return self._plan  # type: ignore[return-value]
+
+
+def _dependent_plan() -> Plan:
+    def _sub(sid: str, desc: str, spec: Specialist, deps: list[str]) -> Subtask:
+        return Subtask(
+            id=sid,
+            description=desc,
+            assigned_specialist=spec,
+            expected_output="x",
+            complexity=1,
+            dependencies=deps,
+        )
+
+    return Plan(
+        task_id="t1",
+        subtasks=[
+            _sub("s1", "research bicycles", Specialist.RESEARCHER, []),
+            _sub("s2", "write the summary", Specialist.WRITER, ["s1"]),
+        ],
+    )
+
+
+def test_dependent_subtask_receives_its_upstream_output() -> None:
+    state = run_task(
+        UpstreamEchoProvider(_dependent_plan()),
+        Task(description="x"),
+        registry=_registry(),
+        memory_store=NullMemoryStore(),
+    )
+    outputs = {o.subtask_id: o for o in state["outputs"]}
+    assert outputs["s1"].content == "MARKER_S1"
+    # s2 ran in a later wave and saw s1's output injected as upstream.
+    assert outputs["s2"].content == "s2_saw_s1=True"
+
+
+@pytest.mark.requires_redis
+def test_fan_out_over_a_real_redis_broker() -> None:
+    """The same fan-out, but eager off and dispatched through a real Redis broker to
+    an actual worker — proving the JSON task payloads round-trip over the wire and the
+    group gathers. (A same-process worker thread still picks up the in-process context,
+    so this exercises the broker without needing live providers.)"""
+    from celery.contrib.testing.worker import start_worker
+
+    from foreman.workers.celery_app import app
+
+    app.conf.task_always_eager = False
+    with start_worker(app, perform_ping_check=False, shutdown_timeout=30):
+        state = run_task(
+            CrewProvider(_mixed_plan()),
+            Task(description="research the bicycle"),
+            registry=_registry(),
+            memory_store=NullMemoryStore(),
+        )
+    outputs = {o.subtask_id: o for o in state["outputs"]}
+    assert set(outputs) == {"s1", "s2", "s3"}
+    assert outputs["s2"].produced_by is Specialist.ANALYST

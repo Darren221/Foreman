@@ -42,5 +42,11 @@ class Settings(BaseSettings):
     store_backend: StoreBackend = "sqlite"
     database_dsn: str | None = None
 
+    # Specialist execution fans out to Redis-brokered Celery workers (Phase 5 C4).
+    # task_always_eager runs tasks in-process (tests/local), bypassing the broker.
+    celery_broker_url: str = "redis://localhost:6379/0"
+    celery_result_backend: str = "redis://localhost:6379/1"
+    celery_task_always_eager: bool = False
+
 
 __all__ = ["Settings", "ProviderName", "StoreBackend"]

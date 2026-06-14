@@ -8,6 +8,7 @@ findings grounded in the program's output (folding in any reviewer feedback).
 
 from __future__ import annotations
 
+from foreman.agents.base import render_upstream
 from foreman.llm.base import LLMProvider
 from foreman.schemas import AnalysisCode, ResearchFindings, Specialist, SpecialistOutput, Subtask
 from foreman.tools import ToolRegistry
@@ -20,6 +21,9 @@ asks for and prints the result. Use only the standard library; print the answer.
 
 Subtask: {description}
 Expected output: {expected_output}
+
+Upstream results from prior steps (the data to analyse):
+{upstream}
 
 Reviewer feedback to address (if any): {feedback}
 """
@@ -44,11 +48,17 @@ class Analyst:
         self._registry = registry
         self._provider = provider
 
-    def execute(self, subtask: Subtask, feedback: str | None = None) -> SpecialistOutput:
+    def execute(
+        self,
+        subtask: Subtask,
+        feedback: str | None = None,
+        upstream: list[SpecialistOutput] | None = None,
+    ) -> SpecialistOutput:
         code = self._provider.structured_complete(
             _CODE_PROMPT.format(
                 description=subtask.description,
                 expected_output=subtask.expected_output,
+                upstream=render_upstream(upstream),
                 feedback=feedback or "none",
             ),
             AnalysisCode,

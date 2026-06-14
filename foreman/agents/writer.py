@@ -6,17 +6,21 @@ passing artifacts); the registry is held so wiring it in is a constructor-free c
 
 from __future__ import annotations
 
+from foreman.agents.base import render_upstream
 from foreman.llm.base import LLMProvider
 from foreman.schemas import ResearchFindings, Specialist, SpecialistOutput, Subtask
 from foreman.tools import ToolRegistry
 
 _PROMPT = """\
 You are a writer. Produce a clear, well-structured written draft that satisfies the
-subtask. Match the expected output; be concise and concrete; do not invent facts
-beyond what the subtask provides.
+subtask, drawing on the upstream results below. Match the expected output; be concise
+and concrete; do not invent facts beyond what the subtask and upstream results provide.
 
 Subtask: {description}
 Expected output: {expected_output}
+
+Upstream results from prior steps (your source material):
+{upstream}
 
 Reviewer feedback to address (if any): {feedback}
 """
@@ -29,10 +33,16 @@ class Writer:
         self._registry = registry
         self._provider = provider
 
-    def execute(self, subtask: Subtask, feedback: str | None = None) -> SpecialistOutput:
+    def execute(
+        self,
+        subtask: Subtask,
+        feedback: str | None = None,
+        upstream: list[SpecialistOutput] | None = None,
+    ) -> SpecialistOutput:
         prompt = _PROMPT.format(
             description=subtask.description,
             expected_output=subtask.expected_output,
+            upstream=render_upstream(upstream),
             feedback=feedback or "none",
         )
         content = self._provider.structured_complete(prompt, ResearchFindings).content
