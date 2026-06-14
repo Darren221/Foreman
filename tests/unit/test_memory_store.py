@@ -37,6 +37,16 @@ def test_remember_and_recall_roundtrip(tmp_path: Path) -> None:
     assert got[0].tools_used == ["web_search"]
 
 
+def test_delete_removes_a_memory_from_recall(tmp_path: Path) -> None:
+    store = ChromaMemoryStore(tmp_path / "mem", FakeEmbedder())
+    memory = _memory("history of the bicycle")
+    store.remember(memory)
+    assert store.recall("history of the bicycle", k=1)
+
+    store.delete([memory.id])
+    assert store.recall("history of the bicycle", k=1) == []
+
+
 def test_recall_ranks_relevant_above_irrelevant(tmp_path: Path) -> None:
     store = ChromaMemoryStore(tmp_path / "mem", FakeEmbedder())
     store.remember(_memory("bicycle history facts"))

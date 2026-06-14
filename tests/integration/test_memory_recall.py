@@ -49,6 +49,9 @@ class SeededMemoryStore(MemoryStore):
     def recall(self, query: str, k: int = 5) -> list[TaskMemory]:
         return self._memories[:k]
 
+    def delete(self, ids: list[str]) -> None:
+        self._memories = [m for m in self._memories if m.id not in ids]
+
 
 class FakeBackend:
     def search(self, query: str, max_results: int) -> list[dict[str, Any]]:

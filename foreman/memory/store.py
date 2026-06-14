@@ -27,6 +27,10 @@ class MemoryStore(ABC):
     def recall(self, query: str, k: int = 5) -> list[TaskMemory]:
         """Return up to `k` memories most similar to `query`, closest first."""
 
+    @abstractmethod
+    def delete(self, ids: list[str]) -> None:
+        """Purge the given memories by id (the user-data delete path; SPEC §7)."""
+
 
 class ChromaMemoryStore(MemoryStore):
     def __init__(self, path: Path, embedder: Embedder) -> None:
@@ -61,3 +65,7 @@ class ChromaMemoryStore(MemoryStore):
         )
         documents = result.get("documents") or [[]]
         return [TaskMemory.model_validate_json(doc) for doc in documents[0]]
+
+    def delete(self, ids: list[str]) -> None:
+        if ids:
+            self._collection.delete(ids=ids)

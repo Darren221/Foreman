@@ -22,6 +22,8 @@ dependencies = [
     "docker>=7.0",
     "celery>=5.3",
     "redis>=5.0",
+    "fastapi>=0.110",
+    "uvicorn>=0.29",
 ]
 
 [project.optional-dependencies]
