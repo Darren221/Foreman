@@ -1,19 +1,20 @@
 """The trace store: where recorded spans live and the tree is rebuilt from them.
 
 A span is the unit of a trace — one timed step (a graph node, a tool call, an LLM
-call) with a parent. Stored flat in SQLite (embedded, no server — the same theme
-as the memory store and checkpointer); `get_trace` reassembles the parent/child
-tree the explorer and replay read. This is the read/write seam the custom
-OpenTelemetry exporter writes into.
+call) with a parent. Stored flat via the storage seam (embedded SQLite locally,
+shared Postgres in the distributed deployment); `get_trace` reassembles the
+parent/child tree the explorer and replay read. This is the read/write seam the
+custom OpenTelemetry exporter writes into.
 """
 
 from __future__ import annotations
 
 import json
-import sqlite3
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
+
+from foreman.storage import Conn
 
 
 @dataclass
@@ -56,12 +57,17 @@ class RunSummary:
 
 
 class TraceStore:
-    """SQLite-backed span storage. One connection per instance; reopening the same
-    file in another process sees the same traces."""
+    """Span storage over the storage seam. One connection per instance; reopening the
+    same store in another process sees the same traces.
 
-    def __init__(self, path: str | Path) -> None:
-        self._conn = sqlite3.connect(str(path), check_same_thread=False)
-        self._conn.row_factory = sqlite3.Row
+    Construct with a `Conn` (the factory injects one for the configured backend) or a
+    path, which is sugar for an embedded SQLite connection. The nanosecond timestamps
+    need `BIGINT`: a span's `start_ns`/`end_ns` are epoch nanoseconds (~1.7e18), which
+    overflow Postgres' 32-bit `INTEGER`. SQLite treats `BIGINT` as plain integer
+    affinity, so one DDL serves both backends."""
+
+    def __init__(self, conn: Conn | str | Path) -> None:
+        self._conn = conn if isinstance(conn, Conn) else Conn.sqlite(conn)
         self._conn.execute(
             """
             CREATE TABLE IF NOT EXISTS spans (
@@ -70,8 +76,8 @@ class TraceStore:
                 parent_id  TEXT,
                 name       TEXT NOT NULL,
                 kind       TEXT NOT NULL,
-                start_ns   INTEGER NOT NULL,
-                end_ns     INTEGER NOT NULL,
+                start_ns   BIGINT NOT NULL,
+                end_ns     BIGINT NOT NULL,
                 status     TEXT NOT NULL,
                 attributes TEXT NOT NULL,
                 events     TEXT NOT NULL DEFAULT '[]'
@@ -81,24 +87,41 @@ class TraceStore:
         self._conn.commit()
 
     def record_span(self, span: SpanRecord) -> None:
-        self._conn.execute(
-            "INSERT OR REPLACE INTO spans "
-            "(span_id, trace_id, parent_id, name, kind, start_ns, end_ns, status, "
-            "attributes, events) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            (
-                span.span_id,
-                span.trace_id,
-                span.parent_id,
-                span.name,
-                span.kind,
-                span.start_ns,
-                span.end_ns,
-                span.status,
-                json.dumps(span.attributes),
-                json.dumps(span.events),
-            ),
+        values = (
+            span.span_id,
+            span.trace_id,
+            span.parent_id,
+            span.name,
+            span.kind,
+            span.start_ns,
+            span.end_ns,
+            span.status,
+            json.dumps(span.attributes),
+            json.dumps(span.events),
         )
+        # A span may be re-exported (same span_id); both backends overwrite on the
+        # primary key, but the syntax differs: SQLite's INSERT OR REPLACE vs
+        # Postgres' ON CONFLICT ... DO UPDATE.
+        if self._conn.is_postgres:
+            sql = (
+                "INSERT INTO spans "
+                "(span_id, trace_id, parent_id, name, kind, start_ns, end_ns, status, "
+                "attributes, events) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
+                "ON CONFLICT (span_id) DO UPDATE SET "
+                "trace_id=EXCLUDED.trace_id, parent_id=EXCLUDED.parent_id, "
+                "name=EXCLUDED.name, kind=EXCLUDED.kind, start_ns=EXCLUDED.start_ns, "
+                "end_ns=EXCLUDED.end_ns, status=EXCLUDED.status, "
+                "attributes=EXCLUDED.attributes, events=EXCLUDED.events"
+            )
+        else:
+            sql = (
+                "INSERT OR REPLACE INTO spans "
+                "(span_id, trace_id, parent_id, name, kind, start_ns, end_ns, status, "
+                "attributes, events) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+            )
+        self._conn.execute(sql, values)
         self._conn.commit()
 
     def get_trace(self, trace_id: str) -> SpanNode | None:
@@ -139,7 +162,7 @@ class TraceStore:
         self._conn.close()
 
     @staticmethod
-    def _to_record(row: sqlite3.Row) -> SpanRecord:
+    def _to_record(row: Any) -> SpanRecord:
         return SpanRecord(
             span_id=row["span_id"],
             trace_id=row["trace_id"],

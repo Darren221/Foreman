@@ -8,8 +8,12 @@ under docker-compose, where the matching env var is set.
 from __future__ import annotations
 
 import os
+from collections.abc import Callable, Iterator
+from pathlib import Path
 
 import pytest
+
+from foreman.storage import Conn
 
 _INFRA_MARKERS = {
     "requires_docker": "FOREMAN_TEST_DOCKER",
@@ -25,3 +29,53 @@ def pytest_collection_modifyitems(
         for marker, env in _INFRA_MARKERS.items():
             if marker in item.keywords and not os.environ.get(env):
                 item.add_marker(pytest.mark.skip(reason=f"infra test; set {env}=1 to run"))
+
+
+@pytest.fixture(
+    params=[
+        "sqlite",
+        pytest.param("postgres", marks=pytest.mark.requires_postgres),
+    ]
+)
+def open_conn(
+    request: pytest.FixtureRequest, tmp_path: Path
+) -> Iterator[Callable[[], Conn]]:
+    """A backend-parameterized factory for storage tests: call it to open a `Conn`.
+
+    Every test that requests it runs twice — embedded SQLite (always) and Postgres
+    (only when FOREMAN_TEST_POSTGRES is set; otherwise that param is skipped by the
+    marker logic above). Calling the factory more than once opens fresh connections
+    to the *same* backing store, which is how the "survives reopen / across
+    processes" tests obtain a second handle. The store classes own table creation,
+    so the factory only hands back connections.
+    """
+    if request.param == "sqlite":
+        path = tmp_path / "store.sqlite"
+        yield lambda: Conn.sqlite(path)
+        return
+
+    # Postgres persists across tests (unlike a fresh tmp_path file), so we drop the
+    # stores' tables before and after to give each test a clean slate.
+    dsn = os.environ.get(
+        "FOREMAN_TEST_POSTGRES_DSN",
+        "postgresql://postgres:postgres@localhost:5432/foreman_test",
+    )
+    opened: list[Conn] = []
+
+    def _drop() -> None:
+        admin = Conn.postgres(dsn)
+        admin.execute("DROP TABLE IF EXISTS approvals")
+        admin.execute("DROP TABLE IF EXISTS spans")
+        admin.commit()
+        admin.close()
+
+    def _open() -> Conn:
+        conn = Conn.postgres(dsn)
+        opened.append(conn)
+        return conn
+
+    _drop()
+    yield _open
+    for conn in opened:
+        conn.close()
+    _drop()

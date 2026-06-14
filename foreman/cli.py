@@ -40,10 +40,10 @@ def main(argv: list[str] | None = None) -> int:
         store = None
         tracer = None
         if args.trace:
-            from foreman.observability import OTelTracer, TraceStore
+            from foreman.observability import OTelTracer
+            from foreman.storage.factory import build_trace_store
 
-            settings.trace_path.parent.mkdir(parents=True, exist_ok=True)
-            store = TraceStore(settings.trace_path)
+            store = build_trace_store(settings)
             tracer = OTelTracer(store)
 
         state = run_task(provider, Task(description=args.task), tracer=tracer)

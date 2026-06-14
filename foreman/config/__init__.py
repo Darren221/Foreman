@@ -8,6 +8,7 @@ from typing import Literal
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 ProviderName = Literal["openai", "anthropic"]
+StoreBackend = Literal["sqlite", "postgres"]
 
 
 class Settings(BaseSettings):
@@ -32,7 +33,14 @@ class Settings(BaseSettings):
     approval_path: Path = Path("./data/approvals.sqlite")
     trace_path: Path = Path("./data/traces.sqlite")
     workspace_path: Path = Path("./data/workspace")
+
+    # Durable state (checkpointer, approval queue, trace store) lives on one of two
+    # backends. SQLite (embedded, default) keeps local single-process runs and the
+    # offline test suite self-contained; Postgres is the shared backend once the API
+    # and workers run as separate processes (Phase 5). `database_dsn` is required
+    # when store_backend == "postgres".
+    store_backend: StoreBackend = "sqlite"
     database_dsn: str | None = None
 
 
-__all__ = ["Settings", "ProviderName"]
+__all__ = ["Settings", "ProviderName", "StoreBackend"]
