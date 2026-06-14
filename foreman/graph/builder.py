@@ -20,14 +20,15 @@ from langgraph.graph import END, START, StateGraph
 from langgraph.types import interrupt
 from opentelemetry import trace
 
-from foreman.agents import Researcher, Reviewer, Supervisor
+from foreman.agents import Analyst, Researcher, Reviewer, Supervisor, Writer
+from foreman.agents.base import SpecialistAgent
 from foreman.graph.state import GraphState
 from foreman.hitl.policy import ApprovalLevel, Escalation, EscalationPolicy, Stage
 from foreman.hitl.queue import Decision, DecisionKind
 from foreman.llm.base import LLMProvider
 from foreman.memory import MemoryStore
 from foreman.observability import NoOpTracer, Tracer, TracingProvider
-from foreman.schemas import ReviewResult, SpecialistOutput, Task, TaskMemory
+from foreman.schemas import ReviewResult, Specialist, SpecialistOutput, Task, TaskMemory
 from foreman.tools import ToolRegistry
 
 MAX_ATTEMPTS = 2
@@ -84,8 +85,12 @@ def build_graph(
     traced_provider = TracingProvider(provider, tracer)
     registry.tracer = tracer
     supervisor = Supervisor(traced_provider)
-    researcher = Researcher(registry, traced_provider)
     reviewer = Reviewer(traced_provider)
+    specialists: dict[Specialist, SpecialistAgent] = {
+        Specialist.RESEARCHER: Researcher(registry, traced_provider),
+        Specialist.ANALYST: Analyst(registry, traced_provider),
+        Specialist.WRITER: Writer(registry, traced_provider),
+    }
     # The gates can only pause if there's somewhere to pause *to*. With no
     # checkpointer there's no human channel, so the gates are inert and the
     # pipeline runs autonomously (degrading to best-effort at the retry cap).
@@ -126,7 +131,8 @@ def build_graph(
         outputs = []
         for subtask in plan.subtasks:
             try:
-                outputs.append(researcher.execute(subtask, feedback=feedback))
+                agent = specialists[subtask.assigned_specialist]
+                outputs.append(agent.execute(subtask, feedback=feedback))
             except Exception as exc:
                 # Degrade gracefully: capture the failure as output so the
                 # reviewer can reject it and the pipeline keeps moving.

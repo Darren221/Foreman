@@ -11,7 +11,7 @@ from __future__ import annotations
 from foreman.llm.base import LLMProvider
 from foreman.schemas import Plan, Specialist, SpecialistOutput, Synthesis, Task, TaskMemory
 
-_DEFAULT_AVAILABLE = frozenset({Specialist.RESEARCHER})
+_DEFAULT_AVAILABLE = frozenset({Specialist.RESEARCHER, Specialist.ANALYST, Specialist.WRITER})
 
 _PROMPT = """\
 You are the supervisor of a team of specialist agents. Decompose the task below

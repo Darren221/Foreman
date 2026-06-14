@@ -43,7 +43,9 @@ class Researcher:
         query = subtask.description[:_MAX_QUERY_LEN]
         result = self._registry.invoke(_TOOL, self.specialist, query=query)
         content = self._summarise(subtask, result.get("results", []), feedback)
-        return SpecialistOutput(subtask_id=subtask.id, content=content, tools_used=[_TOOL])
+        return SpecialistOutput(
+            subtask_id=subtask.id, content=content, tools_used=[_TOOL], produced_by=self.specialist
+        )
 
     def _summarise(
         self, subtask: Subtask, results: list[dict[str, object]], feedback: str | None
