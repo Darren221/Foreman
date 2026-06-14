@@ -19,6 +19,7 @@ dependencies = [
     "chromadb>=0.5",
     "langgraph-checkpoint-sqlite>=2.0",
     "opentelemetry-sdk>=1.20",
+    "docker>=7.0",
 ]
 
 [project.optional-dependencies]

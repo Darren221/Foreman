@@ -7,7 +7,6 @@ backend. The analyst is the only specialist allowed to run code.
 
 from __future__ import annotations
 
-import subprocess
 from typing import Any, Protocol
 
 from foreman.schemas import Specialist
@@ -23,9 +22,10 @@ class SandboxBackend(Protocol):
 class DockerSandbox:
     """Runs code in a throwaway container with the network off and resource limits.
 
-    `docker run --rm --network none --memory ... --cpus ... <image> python -c <code>`.
-    The code is passed as an argument (no shell), so there's no shell-injection path;
-    isolation and resource bounds come from the container, and a timeout caps runtime.
+    Uses the Docker SDK: start a detached container that runs `python -c <code>` with
+    the network disabled and memory/CPU capped, wait for it (bounded by a timeout),
+    collect its output, and remove it. The code is passed as an argument list (no
+    shell), so there's no shell-injection path; isolation comes from the container.
     """
 
     def __init__(
@@ -38,23 +38,37 @@ class DockerSandbox:
         self._image = image
         self._timeout_s = timeout_s
         self._memory = memory
-        self._cpus = cpus
+        self._nano_cpus = int(float(cpus) * 1_000_000_000)
+        self._client: Any = None
+
+    def _docker(self) -> Any:
+        if self._client is None:
+            import docker
+
+            self._client = docker.from_env()
+        return self._client
 
     def run(self, code: str) -> dict[str, Any]:
+        container = self._docker().containers.run(
+            self._image,
+            command=["python", "-c", code],
+            network_disabled=True,
+            mem_limit=self._memory,
+            nano_cpus=self._nano_cpus,
+            detach=True,
+        )
         try:
-            proc = subprocess.run(
-                [
-                    "docker", "run", "--rm", "--network", "none",
-                    "--memory", self._memory, "--cpus", self._cpus,
-                    self._image, "python", "-c", code,
-                ],
-                capture_output=True,
-                text=True,
-                timeout=self._timeout_s,
-            )
-        except subprocess.TimeoutExpired:
+            status = container.wait(timeout=self._timeout_s)
+            return {
+                "stdout": container.logs(stdout=True, stderr=False).decode("utf-8", "replace"),
+                "stderr": container.logs(stdout=False, stderr=True).decode("utf-8", "replace"),
+                "exit_code": status.get("StatusCode", -1),
+            }
+        except Exception:
+            container.kill()
             return {"stdout": "", "stderr": "timed out", "exit_code": 124}
-        return {"stdout": proc.stdout, "stderr": proc.stderr, "exit_code": proc.returncode}
+        finally:
+            container.remove(force=True)
 
 
 class FakeSandbox:
