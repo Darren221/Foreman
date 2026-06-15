@@ -9,4 +9,9 @@ from foreman.memory.store import ChromaMemoryStore, MemoryStore
 
 def build_default_memory_store(settings: Settings) -> MemoryStore:
     embedder = OpenAIEmbedder(settings.openai_api_key or "", settings.embedding_model)
-    return ChromaMemoryStore(settings.memory_path, embedder)
+    return ChromaMemoryStore(
+        settings.memory_path,
+        embedder,
+        host=settings.chroma_host,
+        port=settings.chroma_port,
+    )

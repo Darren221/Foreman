@@ -45,7 +45,8 @@ class DockerSandbox:
         if self._client is None:
             import docker
 
-            self._client = docker.from_env()
+            # docker-py ships py.typed but doesn't re-export from_env for mypy.
+            self._client = docker.from_env()  # type: ignore[attr-defined]
         return self._client
 
     def run(self, code: str) -> dict[str, Any]:

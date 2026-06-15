@@ -29,6 +29,11 @@ class Settings(BaseSettings):
 
     embedding_model: str = "text-embedding-3-small"
     memory_path: Path = Path("./data/memory")
+    # Chroma runs embedded (a local dir) by default; set chroma_host to use a Chroma
+    # server, which the distributed deployment needs so the API and workers (separate
+    # processes) share one long-term memory store.
+    chroma_host: str | None = None
+    chroma_port: int = 8000
     checkpoint_path: Path = Path("./data/checkpoints.sqlite")
     approval_path: Path = Path("./data/approvals.sqlite")
     trace_path: Path = Path("./data/traces.sqlite")
