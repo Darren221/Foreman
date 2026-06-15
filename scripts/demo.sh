@@ -7,9 +7,8 @@ API="${FOREMAN_API:-http://localhost:8000}"
 TASK="${FOREMAN_TASK:-Research the most popular Python web frameworks, analyse which has grown fastest, and write a short recommendation.}"
 
 echo "Submitting showcase task to $API ..."
-resp=$(curl -sf -X POST "$API/tasks" \
-  -H 'content-type: application/json' \
-  -d "$(python3 -c 'import json,os; print(json.dumps({"description": os.environ["TASK"]}))' TASK="$TASK")")
+payload=$(TASK="$TASK" python3 -c 'import json,os; print(json.dumps({"description": os.environ["TASK"]}))')
+resp=$(curl -sf -X POST "$API/tasks" -H 'content-type: application/json' -d "$payload")
 
 id=$(printf '%s' "$resp" | python3 -c 'import sys,json; print(json.load(sys.stdin)["id"])')
 status=$(printf '%s' "$resp" | python3 -c 'import sys,json; print(json.load(sys.stdin)["status"])')
