@@ -10,10 +10,7 @@ Run it with:  streamlit run foreman/ui/review.py
 
 from __future__ import annotations
 
-import sqlite3
-
 import streamlit as st
-from langgraph.checkpoint.sqlite import SqliteSaver
 
 from foreman.config import Settings
 from foreman.hitl import ApprovalQueue, DecisionKind, Runner
@@ -21,6 +18,7 @@ from foreman.hitl.queue import PendingApproval
 from foreman.llm import select_provider
 from foreman.memory import build_default_memory_store
 from foreman.schemas import Plan
+from foreman.storage.factory import build_approval_queue, build_checkpointer
 from foreman.tools import build_default_registry
 from foreman.ui.wiring import available_decisions, build_decision, submit_decision
 
@@ -31,15 +29,12 @@ def _runner_and_queue() -> tuple[Runner, ApprovalQueue]:
     and checkpointer both point at the SQLite files the headless runner wrote, so
     this UI resumes the very runs another process paused."""
     settings = Settings()
-    queue = ApprovalQueue(settings.approval_path)
-    saver = SqliteSaver(
-        sqlite3.connect(str(settings.checkpoint_path), check_same_thread=False)
-    )
+    queue = build_approval_queue(settings)
     runner = Runner(
         provider=select_provider(settings),
         registry=build_default_registry(settings),
         memory_store=build_default_memory_store(settings),
-        checkpointer=saver,
+        checkpointer=build_checkpointer(settings),
         queue=queue,
     )
     return runner, queue

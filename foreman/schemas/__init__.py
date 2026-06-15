@@ -102,6 +102,7 @@ class SpecialistOutput(BaseModel):
     subtask_id: str
     content: str
     tools_used: list[str] = Field(default_factory=list)
+    produced_by: Specialist | None = None
 
 
 class ReviewResult(BaseModel):
@@ -116,6 +117,12 @@ class ResearchFindings(BaseModel):
     """A specialist's findings, written up from raw tool output."""
 
     content: str
+
+
+class AnalysisCode(BaseModel):
+    """Python the analyst will run in the sandbox to compute its result."""
+
+    code: str
 
 
 class Synthesis(BaseModel):

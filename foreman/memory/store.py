@@ -27,15 +27,26 @@ class MemoryStore(ABC):
     def recall(self, query: str, k: int = 5) -> list[TaskMemory]:
         """Return up to `k` memories most similar to `query`, closest first."""
 
+    @abstractmethod
+    def delete(self, ids: list[str]) -> None:
+        """Purge the given memories by id (the user-data delete path; SPEC §7)."""
+
 
 class ChromaMemoryStore(MemoryStore):
-    def __init__(self, path: Path, embedder: Embedder) -> None:
+    def __init__(
+        self, path: Path, embedder: Embedder, *, host: str | None = None, port: int = 8000
+    ) -> None:
         import chromadb
 
-        path = Path(path)
-        path.mkdir(parents=True, exist_ok=True)
         self._embedder = embedder
-        self._client = chromadb.PersistentClient(path=str(path))
+        # Server mode (a shared Chroma the API and workers both reach) when a host is
+        # given; otherwise embedded against a local directory.
+        if host:
+            self._client = chromadb.HttpClient(host=host, port=port)
+        else:
+            path = Path(path)
+            path.mkdir(parents=True, exist_ok=True)
+            self._client = chromadb.PersistentClient(path=str(path))
         self._collection = self._client.get_or_create_collection(
             name=_COLLECTION,
             metadata={"hnsw:space": "cosine"},
@@ -61,3 +72,7 @@ class ChromaMemoryStore(MemoryStore):
         )
         documents = result.get("documents") or [[]]
         return [TaskMemory.model_validate_json(doc) for doc in documents[0]]
+
+    def delete(self, ids: list[str]) -> None:
+        if ids:
+            self._collection.delete(ids=ids)

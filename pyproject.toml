@@ -16,9 +16,14 @@ dependencies = [
     "pydantic>=2.7",
     "pydantic-settings>=2.3",
     "tavily-python>=0.5",
-    "chromadb>=0.5",
+    "chromadb>=1.5,<2",
     "langgraph-checkpoint-sqlite>=2.0",
     "opentelemetry-sdk>=1.20",
+    "docker>=7.0",
+    "celery>=5.3",
+    "redis>=5.0",
+    "fastapi>=0.110",
+    "uvicorn>=0.29",
 ]
 
 [project.optional-dependencies]
@@ -29,6 +34,10 @@ dev = [
 ]
 ui = [
     "streamlit>=1.30",
+]
+postgres = [
+    "psycopg[binary]>=3.1",
+    "langgraph-checkpoint-postgres>=2.0",
 ]
 
 [project.scripts]
@@ -51,3 +60,8 @@ ignore_missing_imports = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+markers = [
+    "requires_docker: needs a working Docker daemon (run under docker-compose)",
+    "requires_postgres: needs a Postgres instance",
+    "requires_redis: needs a Redis instance",
+]

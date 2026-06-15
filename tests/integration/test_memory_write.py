@@ -51,6 +51,9 @@ class FakeMemoryStore(MemoryStore):
     def recall(self, query: str, k: int = 5) -> list[TaskMemory]:
         return list(self.memories)[:k]
 
+    def delete(self, ids: list[str]) -> None:
+        self.memories = [m for m in self.memories if m.id not in ids]
+
 
 def _registry() -> ToolRegistry:
     reg = ToolRegistry()

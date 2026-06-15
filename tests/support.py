@@ -27,3 +27,26 @@ class NullMemoryStore(MemoryStore):
 
     def recall(self, query: str, k: int = 5) -> list[TaskMemory]:
         return []
+
+    def delete(self, ids: list[str]) -> None:
+        return None
+
+
+class DictMemoryStore(MemoryStore):
+    """An in-memory store that actually keeps memories — recall does substring match
+    on the task description. Enough to verify remember/recall/delete wiring offline
+    without Chroma or an embedder."""
+
+    def __init__(self) -> None:
+        self._items: dict[str, TaskMemory] = {}
+
+    def remember(self, memory: TaskMemory) -> None:
+        self._items[memory.id] = memory
+
+    def recall(self, query: str, k: int = 5) -> list[TaskMemory]:
+        hits = [m for m in self._items.values() if query.lower() in m.task_description.lower()]
+        return hits[:k]
+
+    def delete(self, ids: list[str]) -> None:
+        for memory_id in ids:
+            self._items.pop(memory_id, None)

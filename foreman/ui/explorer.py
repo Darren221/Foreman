@@ -13,12 +13,13 @@ import streamlit as st
 
 from foreman.config import Settings
 from foreman.observability import RunSummary, TraceStore, summarize
+from foreman.storage.factory import build_trace_store
 from foreman.ui.explorer_wiring import flatten, format_detail, span_content, status_icon
 
 
 @st.cache_resource  # type: ignore[untyped-decorator, unused-ignore]  # untyped only when streamlit absent
 def _store() -> TraceStore:
-    return TraceStore(Settings().trace_path)
+    return build_trace_store(Settings())
 
 
 def _run_label(run: RunSummary) -> str:

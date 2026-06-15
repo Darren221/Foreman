@@ -1,11 +1,16 @@
 """O1: the trace store persists spans and rebuilds the parent/child tree, and
-lists recorded runs (root spans). No OpenTelemetry here — just storage."""
+lists recorded runs (root spans). No OpenTelemetry here — just storage.
+
+Parameterized over both storage backends via the `open_conn` factory: the same
+assertions run against embedded SQLite always, and against a real Postgres when
+FOREMAN_TEST_POSTGRES is set (C3's acceptance criterion)."""
 
 from __future__ import annotations
 
-from pathlib import Path
+from collections.abc import Callable
 
 from foreman.observability import SpanRecord, TraceStore
+from foreman.storage import Conn
 
 
 def _span(span_id: str, parent_id: str | None, name: str, kind: str, **attrs: object) -> SpanRecord:
@@ -22,8 +27,8 @@ def _span(span_id: str, parent_id: str | None, name: str, kind: str, **attrs: ob
     )
 
 
-def test_store_rebuilds_the_span_tree(tmp_path: Path) -> None:
-    store = TraceStore(tmp_path / "traces.sqlite")
+def test_store_rebuilds_the_span_tree(open_conn: Callable[[], Conn]) -> None:
+    store = TraceStore(open_conn())
     store.record_span(_span("a", None, "run", "run", **{"foreman.task": "research bikes"}))
     store.record_span(_span("b", "a", "node:plan", "node"))
     store.record_span(_span("c", "a", "node:execute", "node"))
@@ -36,8 +41,8 @@ def test_store_rebuilds_the_span_tree(tmp_path: Path) -> None:
     store.close()
 
 
-def test_list_runs_returns_root_spans(tmp_path: Path) -> None:
-    store = TraceStore(tmp_path / "traces.sqlite")
+def test_list_runs_returns_root_spans(open_conn: Callable[[], Conn]) -> None:
+    store = TraceStore(open_conn())
     store.record_span(_span("a", None, "run", "run", **{"foreman.task": "t"}))
     store.record_span(_span("b", "a", "node:plan", "node"))
 
@@ -47,12 +52,11 @@ def test_list_runs_returns_root_spans(tmp_path: Path) -> None:
     store.close()
 
 
-def test_get_trace_survives_reopen(tmp_path: Path) -> None:
-    path = tmp_path / "traces.sqlite"
-    store = TraceStore(path)
+def test_get_trace_survives_reopen(open_conn: Callable[[], Conn]) -> None:
+    store = TraceStore(open_conn())
     store.record_span(_span("a", None, "run", "run"))
     store.close()
 
-    reopened = TraceStore(path)
+    reopened = TraceStore(open_conn())
     assert reopened.get_trace("trace-1") is not None
     reopened.close()

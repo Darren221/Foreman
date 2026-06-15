@@ -140,7 +140,11 @@ def test_tool_and_llm_spans_nest_under_their_nodes(tmp_path: Path) -> None:
 
     execute = _find(root, "node:execute")
     assert execute is not None
-    tool_spans = [c for c in execute.children if c.span.kind == "tool"]
+    # The worker runs the specialist in its own span under node:execute; the tool
+    # call nests under that specialist span (the worker boundary stays in the tree).
+    specialist = _find(execute, "specialist:researcher")
+    assert specialist is not None
+    tool_spans = [c for c in specialist.children if c.span.kind == "tool"]
     assert [s.span.name for s in tool_spans] == ["tool:web_search"]
 
     llm_spans = _collect(root, "llm")

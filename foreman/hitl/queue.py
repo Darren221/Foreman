@@ -3,22 +3,24 @@
 When a run pauses for approval, its `Escalation` is persisted here and the run's
 checkpoint is held by the graph's checkpointer. The two together are what let a
 paused run outlive the process: the queue says *what* needs deciding, the
-checkpointer holds the state to resume into. SQLite keeps the "embedded, no
-server" theme shared with the memory store and the checkpointer.
+checkpointer holds the state to resume into. The queue rides the storage seam, so
+it runs on embedded SQLite locally and on shared Postgres once the API and workers
+are separate processes.
 """
 
 from __future__ import annotations
 
-import sqlite3
 import uuid
 from datetime import UTC, datetime
 from enum import StrEnum
 from pathlib import Path
+from typing import Any
 
 from pydantic import BaseModel
 
 from foreman.hitl.policy import Escalation
 from foreman.schemas import Plan
+from foreman.storage import Conn
 
 
 class DecisionKind(StrEnum):
@@ -53,12 +55,15 @@ class PendingApproval(BaseModel):
 
 
 class ApprovalQueue:
-    """A SQLite-backed queue of approvals. One connection per instance; safe to
-    reopen the same file in another process and see the same pending items."""
+    """A queue of approvals over the storage seam. One connection per instance; safe
+    to reopen the same store in another process and see the same pending items.
 
-    def __init__(self, path: str | Path) -> None:
-        self._conn = sqlite3.connect(str(path), check_same_thread=False)
-        self._conn.row_factory = sqlite3.Row
+    Construct with a `Conn` (the factory injects one for the configured backend) or
+    a path, which is sugar for an embedded SQLite connection. The DDL below is valid
+    on both backends — only TEXT and INTEGER, no backend-specific types."""
+
+    def __init__(self, conn: Conn | str | Path) -> None:
+        self._conn = conn if isinstance(conn, Conn) else Conn.sqlite(conn)
         self._conn.execute(
             """
             CREATE TABLE IF NOT EXISTS approvals (
@@ -111,7 +116,7 @@ class ApprovalQueue:
         self._conn.close()
 
     @staticmethod
-    def _to_model(row: sqlite3.Row) -> PendingApproval:
+    def _to_model(row: Any) -> PendingApproval:
         return PendingApproval(
             id=row["id"],
             thread_id=row["thread_id"],

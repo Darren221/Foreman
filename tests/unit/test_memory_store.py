@@ -1,4 +1,5 @@
 from pathlib import Path
+from typing import Any
 
 from foreman.memory import ChromaMemoryStore, Embedder, OpenAIEmbedder
 from foreman.schemas import TaskMemory
@@ -35,6 +36,38 @@ def test_remember_and_recall_roundtrip(tmp_path: Path) -> None:
     assert len(got) == 1
     assert got[0].task_description == "history of the bicycle"
     assert got[0].tools_used == ["web_search"]
+
+
+def test_server_mode_uses_http_client(monkeypatch: Any) -> None:
+    import chromadb
+
+    called: dict[str, object] = {}
+
+    class _FakeCollection:
+        def count(self) -> int:
+            return 0
+
+    class _FakeClient:
+        def get_or_create_collection(self, **kwargs: object) -> _FakeCollection:
+            return _FakeCollection()
+
+    def _fake_http(host: str, port: int) -> _FakeClient:
+        called["host"], called["port"] = host, port
+        return _FakeClient()
+
+    monkeypatch.setattr(chromadb, "HttpClient", _fake_http)
+    ChromaMemoryStore(Path("/unused"), FakeEmbedder(), host="chroma", port=8000)
+    assert called == {"host": "chroma", "port": 8000}
+
+
+def test_delete_removes_a_memory_from_recall(tmp_path: Path) -> None:
+    store = ChromaMemoryStore(tmp_path / "mem", FakeEmbedder())
+    memory = _memory("history of the bicycle")
+    store.remember(memory)
+    assert store.recall("history of the bicycle", k=1)
+
+    store.delete([memory.id])
+    assert store.recall("history of the bicycle", k=1) == []
 
 
 def test_recall_ranks_relevant_above_irrelevant(tmp_path: Path) -> None:
