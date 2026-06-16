@@ -65,6 +65,23 @@ class Runner:
         self._queue.resolve(approval_id, decision)
         return self._after(state, pending.thread_id)
 
+    def status(self, run_id: str) -> RunResult | None:
+        """The durable status of a run, recovered from the approval queue and the
+        checkpointer rather than from process memory, so it survives a restart. A
+        pending approval for the run means it's paused; otherwise the checkpointed
+        state carries the result. None if the run is unknown (no pending approval and
+        no checkpoint)."""
+        for pending in self._queue.pending():
+            if pending.thread_id == run_id:
+                return RunResult(
+                    status="pending", approval_id=pending.id, escalation=pending.escalation
+                )
+        config = {"configurable": {"thread_id": run_id}}
+        snapshot = self._graph().get_state(config)
+        if not snapshot.values:
+            return None
+        return RunResult(status="completed", result=snapshot.values.get("result"))
+
     def _graph(self) -> Any:
         # Imported lazily: the graph builder imports the hitl policy/queue, so a
         # module-level import here would close a cycle (builder -> hitl -> runner).

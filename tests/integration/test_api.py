@@ -138,3 +138,77 @@ def test_delete_memory_endpoint_purges_from_recall(tmp_path: Path) -> None:
         assert client.delete(f"/memory/{record.id}").status_code == 204
         assert memory.recall("history of the bicycle") == []
         queue.close()
+
+
+def test_completed_run_status_survives_a_fresh_app(tmp_path: Path) -> None:
+    """GET /tasks/{id} must report a finished run even from a brand-new app instance
+    (the status lives in the checkpointer + queue, not in app memory)."""
+    cpath, qpath = tmp_path / "c.sqlite", tmp_path / "q.sqlite"
+    memory = DictMemoryStore()
+
+    with SqliteSaver.from_conn_string(str(cpath)) as saver:
+        queue = ApprovalQueue(qpath)
+        runner = Runner(
+            provider=EchoProvider(_plan()),
+            registry=_registry(),
+            memory_store=memory,
+            checkpointer=saver,
+            queue=queue,
+        )
+        run_id = (
+            TestClient(create_app(runner, queue, memory))
+            .post("/tasks", json={"description": "research the bicycle"})
+            .json()["id"]
+        )
+        queue.close()
+
+    # A fresh app over the same stores (simulating a restart) still knows the run.
+    with SqliteSaver.from_conn_string(str(cpath)) as saver2:
+        queue2 = ApprovalQueue(qpath)
+        runner2 = Runner(
+            provider=EchoProvider(_plan()),
+            registry=_registry(),
+            memory_store=memory,
+            checkpointer=saver2,
+            queue=queue2,
+        )
+        body = TestClient(create_app(runner2, queue2, memory)).get(f"/tasks/{run_id}").json()
+        assert body["status"] == "completed"
+        assert body["result"]
+        queue2.close()
+
+
+def test_pending_run_status_survives_a_fresh_app(tmp_path: Path) -> None:
+    """A paused run must still report pending from a fresh app instance."""
+    cpath, qpath = tmp_path / "c.sqlite", tmp_path / "q.sqlite"
+    memory = DictMemoryStore()
+
+    with SqliteSaver.from_conn_string(str(cpath)) as saver:
+        queue = ApprovalQueue(qpath)
+        runner = Runner(
+            provider=EchoProvider(_plan()),
+            registry=_registry(),
+            memory_store=memory,
+            checkpointer=saver,
+            queue=queue,
+        )
+        run_id = (
+            TestClient(create_app(runner, queue, memory))
+            .post("/tasks", json={"description": "wire the funds", "sensitive": True})
+            .json()["id"]
+        )
+        queue.close()
+
+    with SqliteSaver.from_conn_string(str(cpath)) as saver2:
+        queue2 = ApprovalQueue(qpath)
+        runner2 = Runner(
+            provider=EchoProvider(_plan()),
+            registry=_registry(),
+            memory_store=memory,
+            checkpointer=saver2,
+            queue=queue2,
+        )
+        body = TestClient(create_app(runner2, queue2, memory)).get(f"/tasks/{run_id}").json()
+        assert body["status"] == "pending"
+        assert body["approval_id"]
+        queue2.close()
