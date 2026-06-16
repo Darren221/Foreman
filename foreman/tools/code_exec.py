@@ -11,6 +11,7 @@ from typing import Any, Protocol
 
 from foreman.schemas import Specialist
 from foreman.tools.base import Tool
+from foreman.tools.limits import MAX_OUTPUT_BYTES
 
 
 class SandboxBackend(Protocol):
@@ -60,9 +61,14 @@ class DockerSandbox:
         )
         try:
             status = container.wait(timeout=self._timeout_s)
+            # Cap captured output so a program printing gigabytes can't blow up the
+            # worker's memory. (Truncates the bytes Docker buffered; the container's
+            # own mem_limit doesn't bound what we read back.)
+            stdout = container.logs(stdout=True, stderr=False)[:MAX_OUTPUT_BYTES]
+            stderr = container.logs(stdout=False, stderr=True)[:MAX_OUTPUT_BYTES]
             return {
-                "stdout": container.logs(stdout=True, stderr=False).decode("utf-8", "replace"),
-                "stderr": container.logs(stdout=False, stderr=True).decode("utf-8", "replace"),
+                "stdout": stdout.decode("utf-8", "replace"),
+                "stderr": stderr.decode("utf-8", "replace"),
                 "exit_code": status.get("StatusCode", -1),
             }
         except Exception:

@@ -9,12 +9,21 @@ import pytest
 
 from foreman.schemas import Specialist
 from foreman.tools.files import FileTool
+from foreman.tools.limits import MAX_OUTPUT_BYTES
 
 
 def test_write_then_read_round_trips(tmp_path: Path) -> None:
     tool = FileTool(tmp_path)
     tool.run(operation="write", path="notes/draft.md", content="hello")
     assert tool.run(operation="read", path="notes/draft.md")["content"] == "hello"
+
+
+def test_read_is_capped_at_the_limit(tmp_path: Path) -> None:
+    tool = FileTool(tmp_path)
+    (tmp_path / "big.txt").write_text("a" * (MAX_OUTPUT_BYTES + 100))
+    result = tool.run(operation="read", path="big.txt")
+    assert len(result["content"]) == MAX_OUTPUT_BYTES
+    assert result["truncated"] is True
 
 
 def test_path_escaping_the_workspace_is_rejected(tmp_path: Path) -> None:

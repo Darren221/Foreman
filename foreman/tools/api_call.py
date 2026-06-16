@@ -11,6 +11,7 @@ from typing import Any, Protocol
 
 from foreman.schemas import Specialist
 from foreman.tools.base import Tool
+from foreman.tools.limits import read_capped
 
 
 class HttpBackend(Protocol):
@@ -29,9 +30,11 @@ class UrllibBackend:
         from urllib.request import urlopen
 
         with urlopen(url, timeout=self._timeout_s) as response:  # noqa: S310 (scheme checked in the tool)
+            raw, truncated = read_capped(response)
             return {
                 "status": response.status,
-                "body": response.read().decode("utf-8", "replace"),
+                "body": raw.decode("utf-8", "replace"),
+                "truncated": truncated,
             }
 
 
