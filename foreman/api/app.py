@@ -7,9 +7,9 @@ over a `TestClient`; `build_app` wires the real ones from config for `uvicorn`.
 
 Run it:  uvicorn --factory foreman.api.app:build_app
 
-Run tracking is in-process: `Runner.submit` runs synchronously to completion-or-pause,
-so the outcome is known when the request returns; we keep the last `RunResult` per run
-id for `GET /tasks/{id}`. Durable status (reading the checkpointer) is a follow-up.
+`Runner.submit` runs synchronously to completion-or-pause, so the outcome is known when the
+request returns. `GET /tasks/{id}` reads status durably via `Runner.status` (the approval
+queue plus the checkpointer), so it survives a restart instead of living in process memory.
 """
 
 from __future__ import annotations
@@ -57,8 +57,6 @@ def _response(run_id: str, result: RunResult) -> TaskResponse:
 
 def create_app(runner: Runner, queue: ApprovalQueue, memory_store: MemoryStore) -> FastAPI:
     app = FastAPI(title="Foreman")
-    # run id -> its latest outcome (see the module docstring on run tracking).
-    runs: dict[str, RunResult] = {}
 
     @app.post("/tasks")
     def submit_task(request: TaskRequest) -> TaskResponse:
@@ -68,12 +66,13 @@ def create_app(runner: Runner, queue: ApprovalQueue, memory_store: MemoryStore) 
             sensitive=request.sensitive,
         )
         result = runner.submit(task)
-        runs[task.id] = result
         return _response(task.id, result)
 
     @app.get("/tasks/{run_id}")
     def get_task(run_id: str) -> TaskResponse:
-        result = runs.get(run_id)
+        # Durable: read the run's status from the queue + checkpointer, so it
+        # survives a restart rather than living only in this process's memory.
+        result = runner.status(run_id)
         if result is None:
             raise HTTPException(status_code=404, detail="unknown task")
         return _response(run_id, result)
@@ -94,7 +93,6 @@ def create_app(runner: Runner, queue: ApprovalQueue, memory_store: MemoryStore) 
             output=request.output,
         )
         result = runner.resume(approval_id, decision)
-        runs[pending.thread_id] = result
         return _response(pending.thread_id, result)
 
     @app.delete("/memory/{memory_id}", status_code=204)
