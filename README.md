@@ -111,7 +111,7 @@ The parts that took real design, not just wiring:
 
 ## Screenshots
 
-> Captures of a live run. See [`docs/DEMO.md`](docs/DEMO.md) for how they're produced.
+> Captures from a live run.
 
 | Operator review queue | Trace explorer (cross-worker span tree) |
 | --- | --- |
