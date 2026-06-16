@@ -111,11 +111,9 @@ The parts that took real design, not just wiring:
 
 ## Screenshots
 
-> Captures from a live run.
-
-| Operator review queue | Trace explorer (cross-worker span tree) |
-| --- | --- |
-| ![Review queue](docs/images/review-queue.png) | ![Trace explorer](docs/images/trace-explorer.png) |
+_Coming soon: the operator review queue (a paused run awaiting approval) and the
+trace-explorer span tree (nested cross-worker spans with per-node cost), plus a short
+walkthrough video._
 
 ## A real run
 
