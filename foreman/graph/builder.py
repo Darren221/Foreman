@@ -114,7 +114,8 @@ def build_graph(
     human_in_loop = checkpointer is not None
 
     def retrieve_node(state: GraphState) -> GraphState:
-        memories = memory_store.recall(state["task"].description)
+        task = state["task"]
+        memories = memory_store.recall(task.description, user_id=task.user_id)
         return {"retrieved_memories": memories}
 
     def plan_node(state: GraphState) -> GraphState:
@@ -254,6 +255,7 @@ def build_graph(
             score=review.score if review else 0.0,
             tools_used=tools_used,
             result_snippet=(state.get("result") or "")[:_RESULT_SNIPPET_LEN],
+            user_id=state["task"].user_id,
         )
         memory_store.remember(memory)
         return {}
