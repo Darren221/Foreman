@@ -33,9 +33,17 @@ class PostgresBackend:
             from psycopg.rows import dict_row
 
             self._conn = psycopg.connect(self._dsn, row_factory=dict_row)
-        with self._conn.cursor() as cur:
-            cur.execute(sql)
-            rows: list[dict[str, Any]] = cur.fetchall()
+            # The real read-only guarantee: the connection itself refuses writes, so a
+            # write that slips past the tool's string guard is rejected by Postgres.
+            self._conn.read_only = True
+        try:
+            with self._conn.cursor() as cur:
+                cur.execute(sql)
+                rows: list[dict[str, Any]] = cur.fetchall()
+            self._conn.commit()
+        except Exception:
+            self._conn.rollback()
+            raise
         return rows
 
 
@@ -58,7 +66,12 @@ class DatabaseQueryTool(Tool):
         self._backend = backend
 
     def run(self, **inputs: Any) -> dict[str, Any]:
-        sql = inputs["query"]
-        if not sql.strip().lower().startswith("select"):
+        # A friendly early fail. The binding guarantee is the read-only *connection*
+        # in PostgresBackend; this just rejects the obvious cases before a round-trip.
+        stripped = inputs["query"].strip().rstrip(";").strip()
+        if not stripped.lower().startswith("select"):
             raise ValueError("only read-only SELECT queries are allowed")
+        if ";" in stripped:
+            raise ValueError("only a single statement is allowed")
+        sql = inputs["query"]
         return {"rows": self._backend.query(sql)}
