@@ -11,6 +11,7 @@ from __future__ import annotations
 from typing import Any, cast
 
 from foreman.llm.base import LLMProvider, T, Usage
+from foreman.llm.retry import with_retries
 
 
 class OpenAIProvider(LLMProvider):
@@ -30,10 +31,15 @@ class OpenAIProvider(LLMProvider):
 
     def structured_complete(self, prompt: str, schema: type[T]) -> T:
         client = self._ensure_client()
-        completion = client.beta.chat.completions.parse(
-            model=self.model,
-            messages=[{"role": "user", "content": prompt}],
-            response_format=schema,
+        from openai import APIConnectionError, InternalServerError, RateLimitError
+
+        completion = with_retries(
+            lambda: client.beta.chat.completions.parse(
+                model=self.model,
+                messages=[{"role": "user", "content": prompt}],
+                response_format=schema,
+            ),
+            retry_on=(RateLimitError, APIConnectionError, InternalServerError),
         )
         self.last_usage = _openai_usage(getattr(completion, "usage", None))
         parsed = completion.choices[0].message.parsed
@@ -45,9 +51,10 @@ class OpenAIProvider(LLMProvider):
 class AnthropicProvider(LLMProvider):
     name = "anthropic"
 
-    def __init__(self, api_key: str, model: str) -> None:
+    def __init__(self, api_key: str, model: str, max_tokens: int = 4096) -> None:
         self._api_key = api_key
         self.model = model
+        self._max_tokens = max_tokens
         self._client: Any = None
 
     def _ensure_client(self) -> Any:
@@ -59,6 +66,8 @@ class AnthropicProvider(LLMProvider):
 
     def structured_complete(self, prompt: str, schema: type[T]) -> T:
         client = self._ensure_client()
+        from anthropic import APIConnectionError, InternalServerError, RateLimitError
+
         # Force the model to "return" its answer by calling a tool whose input
         # schema is exactly the target model — the cleanest way to get strict
         # structured output from the Messages API.
@@ -67,12 +76,15 @@ class AnthropicProvider(LLMProvider):
             "description": "Return the structured response.",
             "input_schema": schema.model_json_schema(),
         }
-        message = client.messages.create(
-            model=self.model,
-            max_tokens=4096,
-            tools=[tool],
-            tool_choice={"type": "tool", "name": "respond"},
-            messages=[{"role": "user", "content": prompt}],
+        message = with_retries(
+            lambda: client.messages.create(
+                model=self.model,
+                max_tokens=self._max_tokens,
+                tools=[tool],
+                tool_choice={"type": "tool", "name": "respond"},
+                messages=[{"role": "user", "content": prompt}],
+            ),
+            retry_on=(RateLimitError, APIConnectionError, InternalServerError),
         )
         usage = getattr(message, "usage", None)
         if usage is not None:
