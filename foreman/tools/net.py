@@ -42,14 +42,16 @@ def assert_public_url(url: str, resolve: Resolver = _default_resolve) -> None:
 
 
 def _is_non_public(ip: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
-    return (
-        ip.is_private
-        or ip.is_loopback
-        or ip.is_link_local
-        or ip.is_reserved
-        or ip.is_multicast
-        or ip.is_unspecified
-    )
+    # Unwrap IPv4-in-IPv6 forms (::ffff:x and 6to4) so an embedded internal IPv4
+    # can't smuggle past the check.
+    if isinstance(ip, ipaddress.IPv6Address):
+        embedded = ip.ipv4_mapped or ip.sixtofour
+        if embedded is not None:
+            ip = embedded
+    # Allowlist posture: block anything that isn't a globally-routable public address.
+    # `is_global` already excludes loopback, RFC1918, link-local, CGNAT (100.64/10),
+    # benchmarking, etc.; the rest are belt-and-suspenders.
+    return not ip.is_global or ip.is_reserved or ip.is_multicast or ip.is_unspecified
 
 
 def _addresses_for(host: str, resolve: Resolver) -> list[str]:

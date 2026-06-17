@@ -42,6 +42,11 @@ class UrllibBackend:
     def get(self, url: str) -> dict[str, Any]:
         from urllib.request import build_opener
 
+        # Residual TOCTOU: we resolve DNS here to validate, then urllib resolves
+        # again when it connects, so a hostile resolver could answer public-then-
+        # private across the two lookups (DNS rebinding). Closing it fully needs a
+        # custom connector that pins the validated IP; tracked in the backlog. The
+        # redirect handler below at least re-validates every hop.
         assert_public_url(url)
         opener = build_opener(_ValidatingRedirectHandler())
         with opener.open(url, timeout=self._timeout_s) as response:  # noqa: S310 (validated above)

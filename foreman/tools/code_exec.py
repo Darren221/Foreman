@@ -68,7 +68,9 @@ class DockerSandbox:
             user="65534:65534",
             cap_drop=["ALL"],
             read_only=True,
-            tmpfs={"/tmp": ""},
+            # Writable scratch, but in-memory and size-capped so it can't be used to
+            # fill the host disk or balloon RAM past the container's mem_limit.
+            tmpfs={"/tmp": "size=64m"},
             pids_limit=128,
             security_opt=["no-new-privileges"],
             detach=True,

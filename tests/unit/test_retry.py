@@ -43,3 +43,25 @@ def test_does_not_retry_unlisted_exceptions() -> None:
 
     with pytest.raises(KeyError):
         with_retries(boom, attempts=3, retry_on=(ValueError,), sleep=lambda _s: None)
+
+
+def test_backoff_grows_exponentially() -> None:
+    # Delays double each retry (base, base*2, base*4, ...) so a struggling provider
+    # gets progressively more breathing room instead of a tight retry storm.
+    delays: list[float] = []
+    calls = {"n": 0}
+
+    def always_fails() -> str:
+        calls["n"] += 1
+        raise ValueError("transient")
+
+    with pytest.raises(ValueError):
+        with_retries(
+            always_fails,
+            attempts=4,
+            base_delay=0.5,
+            retry_on=(ValueError,),
+            sleep=delays.append,
+        )
+    # 4 attempts means 3 sleeps between them; the last failure re-raises, no sleep.
+    assert delays == [0.5, 1.0, 2.0]

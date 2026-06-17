@@ -29,6 +29,13 @@ def test_rejects_multi_statement_queries() -> None:
         tool.run(query="SELECT 1; DELETE FROM t")
 
 
+def test_quoted_semicolon_is_allowed() -> None:
+    # A semicolon inside a string literal is a single valid statement, not a smuggle.
+    tool = DatabaseQueryTool(FakeDatabase(rows=[{"x": 1}]))
+    assert tool.run(query="SELECT ';' AS x")["rows"] == [{"x": 1}]
+    assert tool.run(query="SELECT n FROM t WHERE name = ';drop'")["rows"] == [{"x": 1}]
+
+
 @pytest.mark.requires_postgres
 def test_postgres_backend_refuses_writes() -> None:
     # The real guarantee: the connection itself is read-only, so even a write that
@@ -49,6 +56,27 @@ def test_postgres_backend_enforces_statement_timeout() -> None:
     backend = PostgresBackend(os.environ["FOREMAN_TEST_POSTGRES_DSN"], statement_timeout_ms=200)
     with pytest.raises(psycopg.errors.QueryCanceled):
         backend.query("SELECT pg_sleep(2)")
+    backend.close()
+
+
+@pytest.mark.requires_postgres
+def test_postgres_backend_caps_result_rows() -> None:
+    # A query that would return more rows than max_rows is truncated, not loaded whole.
+    backend = PostgresBackend(os.environ["FOREMAN_TEST_POSTGRES_DSN"], max_rows=5)
+    rows = backend.query("SELECT generate_series(1, 100) AS n")
+    assert len(rows) == 5
+    backend.close()
+
+
+@pytest.mark.requires_postgres
+def test_postgres_backend_recovers_after_a_failed_query() -> None:
+    # A failed query rolls back, so the reused connection still works afterwards.
+    import psycopg
+
+    backend = PostgresBackend(os.environ["FOREMAN_TEST_POSTGRES_DSN"])
+    with pytest.raises(psycopg.errors.Error):
+        backend.query("SELECT * FROM no_such_table")
+    assert backend.query("SELECT 1 AS n") == [{"n": 1}]
     backend.close()
 
 
