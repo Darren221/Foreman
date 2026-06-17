@@ -49,10 +49,18 @@ def test_invoke_rejects_specialist_not_on_allow_list() -> None:
         reg.invoke("echo", Specialist.ANALYST, x=1)
 
 
-def test_invoke_unknown_tool_raises() -> None:
+def test_invoke_unknown_tool_raises_valueerror() -> None:
     reg = _registry(EchoTool())
-    with pytest.raises(KeyError):
+    with pytest.raises(ValueError, match="unknown tool"):
         reg.invoke("ghost", Specialist.RESEARCHER)
+
+
+def test_invocation_log_is_bounded() -> None:
+    reg = ToolRegistry(max_invocations=2)
+    reg.register(EchoTool())
+    for _ in range(5):
+        reg.invoke("echo", Specialist.RESEARCHER, x=1)
+    assert len(reg.invocations) == 2
 
 
 def test_failure_is_logged_and_reraised() -> None:

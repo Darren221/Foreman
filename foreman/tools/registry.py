@@ -10,12 +10,17 @@ Routing all invocations through here gives two things for free:
 from __future__ import annotations
 
 import time
+from collections import deque
 from dataclasses import dataclass
 from typing import Any
 
 from foreman.observability import NoOpTracer, Tracer
 from foreman.schemas import Specialist
 from foreman.tools.base import Tool
+
+# The invocation log is observability, not unbounded history: keep only the most
+# recent calls so a long-lived registry can't leak memory.
+_DEFAULT_MAX_INVOCATIONS = 1000
 
 
 @dataclass
@@ -30,9 +35,9 @@ class ToolInvocation:
 
 
 class ToolRegistry:
-    def __init__(self) -> None:
+    def __init__(self, max_invocations: int = _DEFAULT_MAX_INVOCATIONS) -> None:
         self._tools: dict[str, Tool] = {}
-        self.invocations: list[ToolInvocation] = []
+        self.invocations: deque[ToolInvocation] = deque(maxlen=max_invocations)
         # Set by build_graph for a traced run; no-op otherwise.
         self.tracer: Tracer = NoOpTracer()
 
@@ -40,10 +45,14 @@ class ToolRegistry:
         self._tools[tool.name] = tool
 
     def get(self, name: str) -> Tool:
+        if name not in self._tools:
+            raise ValueError(f"unknown tool {name!r}")
         return self._tools[name]
 
     def invoke(self, name: str, caller: Specialist, **inputs: Any) -> dict[str, Any]:
-        tool = self._tools[name]  # KeyError for unknown tool — caller's bug
+        if name not in self._tools:
+            raise ValueError(f"unknown tool {name!r}")
+        tool = self._tools[name]
         if caller not in tool.allowed_specialists:
             raise ValueError(f"{caller.value} is not permitted to call tool '{name}'")
 
