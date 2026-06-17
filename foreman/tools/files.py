@@ -12,6 +12,7 @@ from typing import Any
 
 from foreman.schemas import Specialist
 from foreman.tools.base import Tool
+from foreman.tools.limits import read_capped
 
 
 class FileTool(Tool):
@@ -32,7 +33,9 @@ class FileTool(Tool):
             written = str(target.relative_to(self._workspace.resolve()))
             return {"path": written, "bytes": len(content)}
         if operation == "read":
-            return {"content": target.read_text()}
+            with target.open("rb") as handle:
+                raw, truncated = read_capped(handle)
+            return {"content": raw.decode("utf-8", "replace"), "truncated": truncated}
         raise ValueError(f"unknown file operation {operation!r}")
 
     def _resolve(self, relative: str) -> Path:

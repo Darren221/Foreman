@@ -11,6 +11,7 @@ from typing import Any, Protocol
 
 from foreman.schemas import Specialist
 from foreman.tools.base import Tool
+from foreman.tools.limits import MAX_OUTPUT_BYTES
 
 
 class SandboxBackend(Protocol):
@@ -50,22 +51,44 @@ class DockerSandbox:
         return self._client
 
     def run(self, code: str) -> dict[str, Any]:
+        import requests  # the docker SDK raises requests timeout errors on wait()
+
         container = self._docker().containers.run(
             self._image,
             command=["python", "-c", code],
+            # Defence-in-depth for untrusted, model-authored code. Network off and
+            # mem/cpu capped handle exfiltration and DoS; the rest shrink the blast
+            # radius of a container escape or in-container abuse: run as nobody (not
+            # root), drop every Linux capability, immutable rootfs (with a writable
+            # in-memory /tmp so legit scratch files still work), cap processes against
+            # a fork bomb, and block setuid privilege escalation.
             network_disabled=True,
             mem_limit=self._memory,
             nano_cpus=self._nano_cpus,
+            user="65534:65534",
+            cap_drop=["ALL"],
+            read_only=True,
+            tmpfs={"/tmp": ""},
+            pids_limit=128,
+            security_opt=["no-new-privileges"],
             detach=True,
         )
         try:
             status = container.wait(timeout=self._timeout_s)
+            # Cap captured output so a program printing gigabytes can't blow up the
+            # worker's memory. (Truncates the bytes Docker buffered; the container's
+            # own mem_limit doesn't bound what we read back.)
+            stdout = container.logs(stdout=True, stderr=False)[:MAX_OUTPUT_BYTES]
+            stderr = container.logs(stdout=False, stderr=True)[:MAX_OUTPUT_BYTES]
             return {
-                "stdout": container.logs(stdout=True, stderr=False).decode("utf-8", "replace"),
-                "stderr": container.logs(stdout=False, stderr=True).decode("utf-8", "replace"),
+                "stdout": stdout.decode("utf-8", "replace"),
+                "stderr": stderr.decode("utf-8", "replace"),
                 "exit_code": status.get("StatusCode", -1),
             }
-        except Exception:
+        except (requests.exceptions.ReadTimeout, requests.exceptions.ConnectionError):
+            # Only the wait() timeout becomes a clean 124; any other error propagates
+            # (the registry logs it and the graph degrades it to a failure-output)
+            # rather than being mislabelled "timed out".
             container.kill()
             return {"stdout": "", "stderr": "timed out", "exit_code": 124}
         finally:
