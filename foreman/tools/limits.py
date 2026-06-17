@@ -20,8 +20,20 @@ class _Reader(Protocol):
 
 def read_capped(reader: _Reader, limit: int = MAX_OUTPUT_BYTES) -> tuple[bytes, bool]:
     """Read at most `limit` bytes from `reader`. Returns (data, truncated). Reads one
-    extra byte to detect (but not keep) overflow, so memory stays bounded by `limit`."""
-    data = reader.read(limit + 1)
+    extra byte to detect (but not keep) overflow, so memory stays bounded by `limit`.
+
+    Loops until it has `limit + 1` bytes or hits EOF: a single `read()` may return
+    fewer bytes than asked (sockets, pipes), so one call isn't enough to be sure the
+    source is exhausted or that we've actually reached the cap."""
+    chunks: list[bytes] = []
+    remaining = limit + 1
+    while remaining > 0:
+        chunk = reader.read(remaining)
+        if not chunk:
+            break
+        chunks.append(chunk)
+        remaining -= len(chunk)
+    data = b"".join(chunks)
     if len(data) > limit:
         return data[:limit], True
     return data, False

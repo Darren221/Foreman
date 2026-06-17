@@ -7,10 +7,15 @@ that isn't a SELECT — the analyst can read data, never modify it.
 
 from __future__ import annotations
 
+import re
 from typing import Any, Protocol
 
 from foreman.schemas import Specialist
 from foreman.tools.base import Tool
+
+# Single-quoted string literals (handling the '' escape), removed before the
+# single-statement check so a semicolon *inside* a string isn't a false positive.
+_STRING_LITERAL = re.compile(r"'(?:''|[^'])*'")
 
 
 class DatabaseBackend(Protocol):
@@ -23,9 +28,14 @@ class PostgresBackend:
     """Lazily-connected Postgres client (psycopg arrives in C3). No connection is
     made until the first query, so the tool can be constructed without a DB."""
 
-    def __init__(self, dsn: str, statement_timeout_ms: int = 30_000) -> None:
+    def __init__(
+        self, dsn: str, statement_timeout_ms: int = 30_000, max_rows: int = 10_000
+    ) -> None:
         self._dsn = dsn
         self._statement_timeout_ms = statement_timeout_ms
+        # Cap the rows pulled into worker memory: a SELECT with no LIMIT over a huge
+        # table would otherwise load the whole result set at once.
+        self._max_rows = max_rows
         # One connection per backend, reused for the backend's lifetime; close() when
         # done. (A per-query connect would be safer but far slower.)
         self._conn: Any = None
@@ -54,7 +64,7 @@ class PostgresBackend:
         try:
             with self._conn.cursor() as cur:
                 cur.execute(sql)
-                rows: list[dict[str, Any]] = cur.fetchall()
+                rows: list[dict[str, Any]] = cur.fetchmany(self._max_rows)
             self._conn.commit()
         except Exception:
             self._conn.rollback()
@@ -86,7 +96,7 @@ class DatabaseQueryTool(Tool):
         stripped = inputs["query"].strip().rstrip(";").strip()
         if not stripped.lower().startswith("select"):
             raise ValueError("only read-only SELECT queries are allowed")
-        if ";" in stripped:
+        if ";" in _STRING_LITERAL.sub("", stripped):
             raise ValueError("only a single statement is allowed")
         sql = inputs["query"]
         return {"rows": self._backend.query(sql)}
