@@ -1,7 +1,7 @@
 # Foreman
 
 ![Python](https://img.shields.io/badge/python-3.11%2B-blue)
-![Tests](https://img.shields.io/badge/tests-108%20passing%2C%20offline-brightgreen)
+![Tests](https://img.shields.io/badge/tests-129%20passing%2C%20offline-brightgreen)
 ![Stack](https://img.shields.io/badge/LangGraph%20·%20Celery%20·%20FastAPI%20·%20Postgres%20·%20Redis%20·%20Chroma-informational)
 
 **Production infrastructure for autonomous AI workflows.** A supervisor agent
