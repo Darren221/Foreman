@@ -35,18 +35,22 @@ class PostgresBackend:
             self._conn.close()
             self._conn = None
 
+    def _connect(self) -> Any:
+        import psycopg
+        from psycopg.rows import dict_row
+
+        conn = psycopg.connect(self._dsn, row_factory=dict_row)
+        # The real read-only guarantee: the connection itself refuses writes, so a
+        # write that slips past the tool's string guard is rejected by Postgres.
+        conn.read_only = True
+        # Bound query runtime so a slow/looping query can't hang the connection.
+        conn.execute(f"SET statement_timeout = {int(self._statement_timeout_ms)}")
+        conn.commit()
+        return conn
+
     def query(self, sql: str) -> list[dict[str, Any]]:
         if self._conn is None:
-            import psycopg
-            from psycopg.rows import dict_row
-
-            self._conn = psycopg.connect(self._dsn, row_factory=dict_row)
-            # The real read-only guarantee: the connection itself refuses writes, so a
-            # write that slips past the tool's string guard is rejected by Postgres.
-            self._conn.read_only = True
-            # Bound query runtime so a slow/looping query can't hang the connection.
-            self._conn.execute(f"SET statement_timeout = {int(self._statement_timeout_ms)}")
-            self._conn.commit()
+            self._conn = self._connect()
         try:
             with self._conn.cursor() as cur:
                 cur.execute(sql)
