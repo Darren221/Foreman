@@ -37,3 +37,10 @@ def test_docker_sandbox_is_hardened() -> None:
     assert wrote["stdout"].strip() == "wrote"
     # but the rest of the filesystem is read-only: a write outside /tmp fails
     assert sandbox.run("open('/srv/x', 'w').write('no')")["exit_code"] != 0
+
+
+@pytest.mark.requires_docker
+def test_docker_sandbox_times_out() -> None:
+    result = DockerSandbox(timeout_s=2).run("import time; time.sleep(30)")
+    assert result["exit_code"] == 124
+    assert "timed out" in result["stderr"]

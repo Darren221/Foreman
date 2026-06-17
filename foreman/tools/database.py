@@ -23,9 +23,17 @@ class PostgresBackend:
     """Lazily-connected Postgres client (psycopg arrives in C3). No connection is
     made until the first query, so the tool can be constructed without a DB."""
 
-    def __init__(self, dsn: str) -> None:
+    def __init__(self, dsn: str, statement_timeout_ms: int = 30_000) -> None:
         self._dsn = dsn
+        self._statement_timeout_ms = statement_timeout_ms
+        # One connection per backend, reused for the backend's lifetime; close() when
+        # done. (A per-query connect would be safer but far slower.)
         self._conn: Any = None
+
+    def close(self) -> None:
+        if self._conn is not None:
+            self._conn.close()
+            self._conn = None
 
     def query(self, sql: str) -> list[dict[str, Any]]:
         if self._conn is None:
@@ -36,6 +44,9 @@ class PostgresBackend:
             # The real read-only guarantee: the connection itself refuses writes, so a
             # write that slips past the tool's string guard is rejected by Postgres.
             self._conn.read_only = True
+            # Bound query runtime so a slow/looping query can't hang the connection.
+            self._conn.execute(f"SET statement_timeout = {int(self._statement_timeout_ms)}")
+            self._conn.commit()
         try:
             with self._conn.cursor() as cur:
                 cur.execute(sql)

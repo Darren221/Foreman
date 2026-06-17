@@ -51,6 +51,8 @@ class DockerSandbox:
         return self._client
 
     def run(self, code: str) -> dict[str, Any]:
+        import requests  # the docker SDK raises requests timeout errors on wait()
+
         container = self._docker().containers.run(
             self._image,
             command=["python", "-c", code],
@@ -83,7 +85,10 @@ class DockerSandbox:
                 "stderr": stderr.decode("utf-8", "replace"),
                 "exit_code": status.get("StatusCode", -1),
             }
-        except Exception:
+        except (requests.exceptions.ReadTimeout, requests.exceptions.ConnectionError):
+            # Only the wait() timeout becomes a clean 124; any other error propagates
+            # (the registry logs it and the graph degrades it to a failure-output)
+            # rather than being mislabelled "timed out".
             container.kill()
             return {"stdout": "", "stderr": "timed out", "exit_code": 124}
         finally:

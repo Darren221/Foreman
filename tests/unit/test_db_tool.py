@@ -39,6 +39,17 @@ def test_postgres_backend_refuses_writes() -> None:
     assert backend.query("SELECT 1 AS n") == [{"n": 1}]
     with pytest.raises(psycopg.errors.ReadOnlySqlTransaction):
         backend.query("CREATE TEMP TABLE evil (x int)")
+    backend.close()
+
+
+@pytest.mark.requires_postgres
+def test_postgres_backend_enforces_statement_timeout() -> None:
+    import psycopg
+
+    backend = PostgresBackend(os.environ["FOREMAN_TEST_POSTGRES_DSN"], statement_timeout_ms=200)
+    with pytest.raises(psycopg.errors.QueryCanceled):
+        backend.query("SELECT pg_sleep(2)")
+    backend.close()
 
 
 def test_db_tool_is_for_the_analyst() -> None:
