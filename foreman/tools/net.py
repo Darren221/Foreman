@@ -35,18 +35,21 @@ def assert_public_url(url: str, resolve: Resolver = _default_resolve) -> None:
     if not host:
         raise ValueError("url has no host")
     for address in _addresses_for(host, resolve):
-        ip = ipaddress.ip_address(address)
-        if (
-            ip.is_private
-            or ip.is_loopback
-            or ip.is_link_local
-            or ip.is_reserved
-            or ip.is_multicast
-            or ip.is_unspecified
-        ):
+        if _is_non_public(ipaddress.ip_address(address)):
             raise ValueError(
                 f"url host {host!r} resolves to a non-public address ({address})"
             )
+
+
+def _is_non_public(ip: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
+    return (
+        ip.is_private
+        or ip.is_loopback
+        or ip.is_link_local
+        or ip.is_reserved
+        or ip.is_multicast
+        or ip.is_unspecified
+    )
 
 
 def _addresses_for(host: str, resolve: Resolver) -> list[str]:

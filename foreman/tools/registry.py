@@ -50,9 +50,7 @@ class ToolRegistry:
         return self._tools[name]
 
     def invoke(self, name: str, caller: Specialist, **inputs: Any) -> dict[str, Any]:
-        if name not in self._tools:
-            raise ValueError(f"unknown tool {name!r}")
-        tool = self._tools[name]
+        tool = self.get(name)  # raises ValueError for an unknown tool
         if caller not in tool.allowed_specialists:
             raise ValueError(f"{caller.value} is not permitted to call tool '{name}'")
 
