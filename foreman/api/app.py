@@ -10,6 +10,12 @@ Run it:  uvicorn --factory foreman.api.app:build_app
 `Runner.submit` runs synchronously to completion-or-pause, so the outcome is known when the
 request returns. `GET /tasks/{id}` reads status durably via `Runner.status` (the approval
 queue plus the checkpointer), so it survives a restart instead of living in process memory.
+
+Security / threat model: there is **no authentication** here by design. The API assumes a
+single trusted operator and should be deployed behind your own auth/gateway. Adding
+per-caller auth, and scoping the task and memory-delete endpoints to the requesting user,
+are the first production-hardening steps (the per-user memory work already keys memories by
+`user_id`).
 """
 
 from __future__ import annotations
