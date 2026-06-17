@@ -54,9 +54,21 @@ class DockerSandbox:
         container = self._docker().containers.run(
             self._image,
             command=["python", "-c", code],
+            # Defence-in-depth for untrusted, model-authored code. Network off and
+            # mem/cpu capped handle exfiltration and DoS; the rest shrink the blast
+            # radius of a container escape or in-container abuse: run as nobody (not
+            # root), drop every Linux capability, immutable rootfs (with a writable
+            # in-memory /tmp so legit scratch files still work), cap processes against
+            # a fork bomb, and block setuid privilege escalation.
             network_disabled=True,
             mem_limit=self._memory,
             nano_cpus=self._nano_cpus,
+            user="65534:65534",
+            cap_drop=["ALL"],
+            read_only=True,
+            tmpfs={"/tmp": ""},
+            pids_limit=128,
+            security_opt=["no-new-privileges"],
             detach=True,
         )
         try:

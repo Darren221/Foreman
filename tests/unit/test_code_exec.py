@@ -25,3 +25,15 @@ def test_docker_sandbox_runs_real_code() -> None:
     result = DockerSandbox(timeout_s=120).run("print(6 * 7)")
     assert "42" in result["stdout"]
     assert result["exit_code"] == 0
+
+
+@pytest.mark.requires_docker
+def test_docker_sandbox_is_hardened() -> None:
+    sandbox = DockerSandbox(timeout_s=120)
+    # runs as nobody (uid 65534), not root
+    assert sandbox.run("import os; print(os.getuid())")["stdout"].strip() == "65534"
+    # the writable in-memory /tmp keeps legit scratch files working
+    wrote = sandbox.run("open('/tmp/x', 'w').write('ok'); print('wrote')")
+    assert wrote["stdout"].strip() == "wrote"
+    # but the rest of the filesystem is read-only: a write outside /tmp fails
+    assert sandbox.run("open('/srv/x', 'w').write('no')")["exit_code"] != 0
