@@ -2,22 +2,35 @@
 
 The tool depends on an `HttpBackend` interface (real stdlib client + a fake for
 tests). It's GET-only — a specialist can read from an API, never POST/PUT/DELETE —
-and rejects non-HTTP schemes so it can't be turned into a file/local read.
+rejects non-HTTP schemes, and (in the real client) blocks SSRF to internal/metadata
+addresses, on the initial URL and on every redirect hop.
 """
 
 from __future__ import annotations
 
 from typing import Any, Protocol
+from urllib.request import HTTPRedirectHandler
 
 from foreman.schemas import Specialist
 from foreman.tools.base import Tool
 from foreman.tools.limits import read_capped
+from foreman.tools.net import assert_public_url
 
 
 class HttpBackend(Protocol):
     def get(self, url: str) -> dict[str, Any]:
         """Fetch `url`; return at least `status` and `body`."""
         ...
+
+
+class _ValidatingRedirectHandler(HTTPRedirectHandler):
+    """Re-checks each redirect target, so an allowed host can't 302 us inward."""
+
+    def redirect_request(
+        self, req: Any, fp: Any, code: int, msg: str, headers: Any, newurl: str
+    ) -> Any:
+        assert_public_url(newurl)
+        return super().redirect_request(req, fp, code, msg, headers, newurl)
 
 
 class UrllibBackend:
@@ -27,9 +40,11 @@ class UrllibBackend:
         self._timeout_s = timeout_s
 
     def get(self, url: str) -> dict[str, Any]:
-        from urllib.request import urlopen
+        from urllib.request import build_opener
 
-        with urlopen(url, timeout=self._timeout_s) as response:  # noqa: S310 (scheme checked in the tool)
+        assert_public_url(url)
+        opener = build_opener(_ValidatingRedirectHandler())
+        with opener.open(url, timeout=self._timeout_s) as response:  # noqa: S310 (validated above)
             raw, truncated = read_capped(response)
             return {
                 "status": response.status,
