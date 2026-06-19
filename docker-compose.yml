@@ -88,5 +88,22 @@ services:
       postgres: { condition: service_healthy }
     restart: unless-stopped
 
+  console-ui:
+    image: foreman-app
+    command: ["streamlit", "run", "foreman/ui/console.py", "--server.port=8503", "--server.address=0.0.0.0"]
+    env_file: .env
+    environment:
+      <<: *app-env
+      # The console is an HTTP client of the api service (reached by name in-network);
+      # the review/explorer links are opened by the browser, so they use host ports.
+      FOREMAN_API_URL: http://api:8000
+      FOREMAN_REVIEW_URL: http://localhost:${FOREMAN_REVIEW_PORT:-8501}
+      FOREMAN_EXPLORER_URL: http://localhost:${FOREMAN_EXPLORER_PORT:-8502}
+    ports:
+      - "${FOREMAN_CONSOLE_PORT:-8503}:8503"
+    depends_on:
+      api: { condition: service_started }
+    restart: unless-stopped
+
 volumes:
   chroma-data:
