@@ -24,10 +24,11 @@ from foreman.tools import ToolRegistry
 
 
 class RunResult(BaseModel):
-    """The outcome of a submit/resume: either a finished result, or a pending
-    approval the human must resolve before the run can continue."""
+    """The outcome of a submit/resume, or the polled state of a run: a finished
+    result, a pending approval the human must resolve, or — only ever from `status`,
+    when a run was resumed in another process — still running."""
 
-    status: Literal["completed", "pending"]
+    status: Literal["completed", "pending", "running"]
     result: str | None = None
     approval_id: str | None = None
     escalation: Escalation | None = None
@@ -87,6 +88,12 @@ class Runner:
         snapshot = self._graph().get_state(config)
         if not snapshot.values:
             return None
+        if snapshot.next:
+            # A checkpoint exists but the graph still has nodes to run: the run was
+            # resumed in another process and isn't finished. (resume() claims the
+            # approval before the work completes, so the queue no longer flags it.)
+            # Report it as running, not a resultless "completed".
+            return RunResult(status="running")
         return RunResult(status="completed", result=snapshot.values.get("result"))
 
     def _graph(self) -> Any:
