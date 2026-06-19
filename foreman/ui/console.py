@@ -20,6 +20,7 @@ from foreman.ui.console_wiring import (
     TaskView,
     body_text,
     is_pending,
+    is_running,
 )
 
 _API_URL = os.environ.get("FOREMAN_API_URL", "http://localhost:8000")
@@ -33,14 +34,22 @@ def _client() -> ForemanClient:
     return HttpForemanClient(_API_URL)
 
 
+def _recheck_button(view: TaskView) -> None:
+    if st.button("Re-check status"):
+        st.session_state["view"] = _client().status(view.id)
+        st.rerun()
+
+
 def _render_result(view: TaskView) -> None:
     if is_pending(view):
         st.warning(f"Run `{view.id}` paused for approval.")
         st.write(body_text(view))
         st.markdown(f"Resolve it in the [review queue]({_REVIEW_URL}), then re-check below.")
-        if st.button("Re-check status"):
-            st.session_state["view"] = _client().status(view.id)
-            st.rerun()
+        _recheck_button(view)
+    elif is_running(view):
+        st.info(f"Run `{view.id}` is still running.")
+        st.write(body_text(view))
+        _recheck_button(view)
     else:
         st.success(f"Run `{view.id}` completed.")
         st.markdown(body_text(view))

@@ -52,12 +52,20 @@ def is_pending(view: TaskView) -> bool:
     return view.status == "pending"
 
 
+def is_running(view: TaskView) -> bool:
+    """True when the run is still executing (e.g. resumed after an approval and not yet
+    finished), so the page invites a re-check instead of showing an empty result."""
+    return view.status == "running"
+
+
 def body_text(view: TaskView) -> str:
-    """What to show under the status line: the synthesised result when finished, or a
-    pointer to the approval when paused, so the page always has something to render."""
+    """What to show under the status line: the synthesised result when finished, a
+    pointer to the approval when paused, or a re-check hint while it's still running."""
     if is_pending(view):
         detail = view.escalation_summary or "Paused for approval."
         return f"Paused for approval — resolve it in the review UI.\n\n{detail}"
+    if is_running(view):
+        return "Still running — give it a moment, then re-check."
     return view.result or "(the run finished but produced no result text)"
 
 

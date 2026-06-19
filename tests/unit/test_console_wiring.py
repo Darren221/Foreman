@@ -7,6 +7,7 @@ from foreman.ui.console_wiring import (
     TaskView,
     body_text,
     is_pending,
+    is_running,
     task_view_from_payload,
 )
 
@@ -48,3 +49,13 @@ def test_pending_without_an_escalation_still_renders() -> None:
 def test_completed_with_no_result_text_has_a_fallback() -> None:
     view = task_view_from_payload({"id": "t4", "status": "completed", "result": None})
     assert "no result text" in body_text(view)
+
+
+def test_running_task_invites_a_recheck_not_an_empty_result() -> None:
+    # A run resumed in another process can be mid-flight: status "running" must not
+    # render the resultless-"completed" fallback (the symptom seen in the console).
+    view = task_view_from_payload({"id": "t5", "status": "running"})
+    assert is_running(view)
+    assert not is_pending(view)
+    assert "Still running" in body_text(view)
+    assert "no result text" not in body_text(view)
