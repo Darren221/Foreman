@@ -234,3 +234,43 @@ def test_resume_unknown_approval_raises(tmp_path: Path) -> None:
         with pytest.raises(ValueError):
             runner.resume("nope", Decision(kind=DecisionKind.APPROVE))
         queue.close()
+
+
+def test_resume_claims_the_approval_before_running_the_graph(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # The race that bit us in the distributed deployment: `resume` resolved the
+    # approval *after* the (slow) graph invoke, so a duplicate resume (double-click,
+    # or a Streamlit re-run while the first was still invoking the LLM) passed the
+    # pending check too and re-ran the whole graph. Resolving must come *first*, so it
+    # atomically claims the approval and a duplicate loses the race before any work runs.
+    with SqliteSaver.from_conn_string(str(tmp_path / "c.sqlite")) as saver:
+        queue = ApprovalQueue(tmp_path / "q.sqlite")
+        runner = _runner(saver, queue, _plan())
+        pending = runner.submit(Task(description="x", sensitive=True))
+        assert pending.approval_id is not None
+
+        order: list[str] = []
+
+        class FakeGraph:
+            def invoke(self, command: Any, config: Any) -> dict[str, Any]:
+                order.append("invoke")
+                return {"result": "done"}
+
+        monkeypatch.setattr(runner, "_graph", lambda: FakeGraph())
+        real_resolve = queue.resolve
+        monkeypatch.setattr(
+            queue,
+            "resolve",
+            lambda aid, dec: (order.append("resolve"), real_resolve(aid, dec))[1],
+        )
+
+        runner.resume(pending.approval_id, Decision(kind=DecisionKind.APPROVE))
+        assert order == ["resolve", "invoke"]  # claimed before the expensive resume
+
+        # A duplicate resume of the now-claimed approval must not run the graph again.
+        order.clear()
+        with pytest.raises(ValueError):
+            runner.resume(pending.approval_id, Decision(kind=DecisionKind.APPROVE))
+        assert "invoke" not in order
+        queue.close()
