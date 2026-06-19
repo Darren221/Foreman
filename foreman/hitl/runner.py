@@ -60,9 +60,16 @@ class Runner:
         pending = self._queue.get(approval_id)
         if pending is None or pending.resolved:
             raise ValueError(f"no pending approval with id {approval_id!r}")
+        # Claim the approval *before* the (slow) graph invoke. resolve() flips
+        # resolved 0->1 atomically and raises if it's already claimed, so a duplicate
+        # resume — a double-click, or a Streamlit re-run while the first is still
+        # invoking the LLM — loses the race here instead of re-running the whole graph.
+        # Trade-off: if the invoke below crashes, the approval is left resolved though
+        # the run didn't finish; re-running an already-approved (possibly sensitive)
+        # action is the worse outcome, so we claim first.
+        self._queue.resolve(approval_id, decision)
         config = {"configurable": {"thread_id": pending.thread_id}}
         state = self._graph().invoke(Command(resume=decision.model_dump()), config)
-        self._queue.resolve(approval_id, decision)
         return self._after(state, pending.thread_id)
 
     def status(self, run_id: str) -> RunResult | None:
