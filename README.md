@@ -140,12 +140,13 @@ workers → reviewer → synthesis):
 
 ```bash
 cp .env.example .env          # add provider keys: OPENAI / ANTHROPIC / TAVILY
-docker compose up --build -d  # api, worker, redis, postgres, chroma, both UIs
+docker compose up --build -d  # api, worker, redis, postgres, chroma, three UIs
 bash scripts/demo.sh          # submit the showcase task and watch it run
 ```
 
 - API `http://localhost:8000`: `POST /tasks`, `GET /tasks/{id}`, `GET /approvals`,
   `POST /approvals/{id}`, `DELETE /memory/{id}`
+- Console (submit & watch): `http://localhost:8503`
 - Review UI: `http://localhost:8501` · Trace explorer: `http://localhost:8502`
 
 ### Local development
