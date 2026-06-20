@@ -16,6 +16,15 @@ def test_runs_a_select_through_the_backend() -> None:
     assert tool.run(query="SELECT n FROM t")["rows"] == [{"n": 1}, {"n": 2}]
 
 
+def test_allows_a_leading_cte() -> None:
+    # `WITH ... SELECT` is read-only; a real analyst uses CTEs for multi-step
+    # aggregation, so the guard must not reject them.
+    tool = DatabaseQueryTool(FakeDatabase(rows=[{"region": "West"}]))
+    sql = "WITH q AS (SELECT region, SUM(revenue) r FROM sales GROUP BY region) " \
+          "SELECT region FROM q ORDER BY r ASC LIMIT 1"
+    assert tool.run(query=sql)["rows"] == [{"region": "West"}]
+
+
 def test_rejects_non_select_queries() -> None:
     tool = DatabaseQueryTool(FakeDatabase(rows=[]))
     with pytest.raises(ValueError, match="read-only"):
@@ -84,3 +93,9 @@ def test_db_tool_is_for_the_analyst() -> None:
     assert DatabaseQueryTool(FakeDatabase([])).allowed_specialists == frozenset(
         {Specialist.ANALYST}
     )
+
+
+def test_tool_exposes_the_backend_schema() -> None:
+    # The analyst reads this to ground its SQL in real columns.
+    tool = DatabaseQueryTool(FakeDatabase([], schema="sales(region TEXT, revenue INTEGER)"))
+    assert tool.schema() == "sales(region TEXT, revenue INTEGER)"

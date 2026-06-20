@@ -18,9 +18,29 @@ from foreman.tools.base import Tool
 _STRING_LITERAL = re.compile(r"'(?:''|[^'])*'")
 
 
+def _format_schema(columns: Any) -> str:
+    """Render (table, column, type) triples as one `table(col type, ...)` line per
+    table — a compact form the analyst can read straight into a SELECT."""
+    from collections import defaultdict
+
+    by_table: dict[str, list[str]] = defaultdict(list)
+    for table, column, dtype in columns:
+        by_table[table].append(f"{column} {dtype}")
+    return "\n".join(f"{table}({', '.join(cols)})" for table, cols in by_table.items())
+
+
 class DatabaseBackend(Protocol):
     def query(self, sql: str) -> list[dict[str, Any]]:
         """Run `sql` and return rows as dicts."""
+        ...
+
+    def schema(self) -> str:
+        """A short text description of the tables and columns the analyst can query.
+
+        Grounding the analyst in the real schema is the difference between a query
+        that runs and one that guesses column names. Backends that can't introspect
+        return an empty string, and the analyst falls back to whatever schema hints
+        are in the task."""
         ...
 
 
@@ -71,15 +91,32 @@ class PostgresBackend:
             raise
         return rows
 
+    def schema(self) -> str:
+        """Introspect the public schema via information_schema (itself a read-only
+        query, so it goes through the same read-only connection)."""
+        rows = self.query(
+            "SELECT table_name, column_name, data_type "
+            "FROM information_schema.columns "
+            "WHERE table_schema = 'public' "
+            "ORDER BY table_name, ordinal_position"
+        )
+        return _format_schema(
+            (r["table_name"], r["column_name"], r["data_type"]) for r in rows
+        )
+
 
 class FakeDatabase:
     """Deterministic stand-in for tests — returns canned rows for any query."""
 
-    def __init__(self, rows: list[dict[str, Any]]) -> None:
+    def __init__(self, rows: list[dict[str, Any]], schema: str = "") -> None:
         self._rows = rows
+        self._schema = schema
 
     def query(self, sql: str) -> list[dict[str, Any]]:
         return self._rows
+
+    def schema(self) -> str:
+        return self._schema
 
 
 class DatabaseQueryTool(Tool):
@@ -90,12 +127,22 @@ class DatabaseQueryTool(Tool):
     def __init__(self, backend: DatabaseBackend) -> None:
         self._backend = backend
 
+    def schema(self) -> str:
+        """The queryable schema, for grounding the analyst's SQL. Empty if the
+        backend can't introspect (older fakes, or a backend without `schema`)."""
+        backend_schema = getattr(self._backend, "schema", None)
+        return backend_schema() if callable(backend_schema) else ""
+
     def run(self, **inputs: Any) -> dict[str, Any]:
         # A friendly early fail. The binding guarantee is the read-only *connection*
         # in PostgresBackend; this just rejects the obvious cases before a round-trip.
+        # Allow a leading CTE (`WITH ... SELECT`) too: it's a read-only query, and a
+        # real analyst leans on CTEs for multi-step aggregation. A `WITH` that wraps a
+        # writing statement (Postgres `WITH ... AS (DELETE ...)`) is still caught by
+        # the read-only *connection*, which is the actual guarantee.
         stripped = inputs["query"].strip().rstrip(";").strip()
-        if not stripped.lower().startswith("select"):
-            raise ValueError("only read-only SELECT queries are allowed")
+        if not stripped.lower().startswith(("select", "with")):
+            raise ValueError("only read-only SELECT (or WITH ... SELECT) queries are allowed")
         if ";" in _STRING_LITERAL.sub("", stripped):
             raise ValueError("only a single statement is allowed")
         sql = inputs["query"]
