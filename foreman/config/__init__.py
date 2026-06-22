@@ -47,12 +47,12 @@ class Settings(BaseSettings):
     store_backend: StoreBackend = "sqlite"
     database_dsn: str | None = None
 
-    # The analyst's read-only data source for `db_query`. This is a *separate*
-    # database from the operational store above: the data the crew analyses (e.g. a
-    # sales warehouse) is rarely the same DB that holds Foreman's checkpoints and
-    # approvals. Falls back to `database_dsn` when unset, so a single-DB deployment
-    # still works without extra config. The `db_query` tool is inert when neither
-    # is set (no DSN -> any query fails fast), which is correct for offline runs.
+    # The analyst's read-only data source for `db_query` — a *separate*, analytics
+    # database (e.g. a sales warehouse), not the operational store above. It is
+    # deliberately independent: `db_query` is wired only when this is set explicitly
+    # and never falls back to `database_dsn`, because the operational store is the
+    # control plane (checkpoints/approvals/traces), not data to analyse. Unset (the
+    # default) -> `db_query` is not registered and the analyst stays code-only.
     analyst_database_dsn: str | None = None
 
     # Specialist execution fans out to Redis-brokered Celery workers (Phase 5 C4).
