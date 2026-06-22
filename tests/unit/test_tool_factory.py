@@ -31,9 +31,11 @@ def test_db_query_registered_only_when_a_data_source_is_configured() -> None:
     assert with_db.get("db_query").allowed_specialists == frozenset({Specialist.ANALYST})
 
 
-def test_analyst_dsn_falls_back_to_the_operational_dsn() -> None:
-    # A single-database deployment sets only database_dsn; the analyst reuses it.
+def test_db_query_not_wired_to_the_operational_store() -> None:
+    # Only the operational DSN is set (no analyst DSN). db_query must NOT register:
+    # the operational store (checkpoints/approvals/traces) is the control plane, not
+    # analytics data, and LLM-authored SQL has no business querying it.
     registry = build_default_registry(
         Settings(_env_file=None, database_dsn="postgresql://x/y")  # type: ignore[call-arg]
     )
-    assert registry.has("db_query")
+    assert not registry.has("db_query")

@@ -16,14 +16,14 @@ def build_default_registry(settings: Settings) -> ToolRegistry:
     registry.register(WebSearchTool(TavilyBackend(settings.tavily_api_key or "")))
     registry.register(CodeExecutionTool(DockerSandbox()))
     registry.register(FileTool(settings.workspace_path))
-    # `db_query` is registered only when a data source is configured. With no DSN
-    # the analyst would have nothing to query, so leaving the tool unregistered
-    # keeps the analyst on its code-only path (and `registry.has("db_query")` is the
-    # honest signal of whether live data is available) rather than registering a
-    # tool whose every call fails. The analyst DB is separate from the operational
-    # store; it falls back to `database_dsn` for a single-database deployment.
-    dsn = settings.analyst_database_dsn or settings.database_dsn
-    if dsn:
-        registry.register(DatabaseQueryTool(PostgresBackend(dsn)))
+    # `db_query` is registered only when an *analytics* data source is explicitly
+    # configured (`analyst_database_dsn`). Without it the analyst stays on its
+    # code-only path, and `registry.has("db_query")` is the honest "is live data
+    # available" signal. We deliberately do NOT fall back to `database_dsn`: that's
+    # Foreman's operational store (checkpoints, approvals, traces), not analytics
+    # data — pointing LLM-authored SQL at the control plane would be the wrong data
+    # and a needless exposure. The analyst's data source is an intentional choice.
+    if settings.analyst_database_dsn:
+        registry.register(DatabaseQueryTool(PostgresBackend(settings.analyst_database_dsn)))
     registry.register(ApiCallTool(UrllibBackend()))
     return registry
