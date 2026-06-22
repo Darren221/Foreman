@@ -44,6 +44,11 @@ class ToolRegistry:
     def register(self, tool: Tool) -> None:
         self._tools[tool.name] = tool
 
+    def has(self, name: str) -> bool:
+        """Whether a tool is registered. Lets an agent adapt to an optional
+        capability (e.g. the analyst querying a DB only when one is wired)."""
+        return name in self._tools
+
     def get(self, name: str) -> Tool:
         if name not in self._tools:
             raise ValueError(f"unknown tool {name!r}")

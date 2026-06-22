@@ -125,6 +125,12 @@ class AnalysisCode(BaseModel):
     code: str
 
 
+class SQLQuery(BaseModel):
+    """A read-only SQL query the analyst runs to pull data for its analysis."""
+
+    sql: str
+
+
 class Synthesis(BaseModel):
     """The supervisor's final deliverable, composed from specialist outputs."""
 

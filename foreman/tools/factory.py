@@ -16,6 +16,14 @@ def build_default_registry(settings: Settings) -> ToolRegistry:
     registry.register(WebSearchTool(TavilyBackend(settings.tavily_api_key or "")))
     registry.register(CodeExecutionTool(DockerSandbox()))
     registry.register(FileTool(settings.workspace_path))
-    registry.register(DatabaseQueryTool(PostgresBackend(settings.database_dsn or "")))
+    # `db_query` is registered only when a data source is configured. With no DSN
+    # the analyst would have nothing to query, so leaving the tool unregistered
+    # keeps the analyst on its code-only path (and `registry.has("db_query")` is the
+    # honest signal of whether live data is available) rather than registering a
+    # tool whose every call fails. The analyst DB is separate from the operational
+    # store; it falls back to `database_dsn` for a single-database deployment.
+    dsn = settings.analyst_database_dsn or settings.database_dsn
+    if dsn:
+        registry.register(DatabaseQueryTool(PostgresBackend(dsn)))
     registry.register(ApiCallTool(UrllibBackend()))
     return registry
