@@ -24,29 +24,35 @@ import argparse
 import os
 import sys
 
-# (region, quarter, revenue, units, returns) — 4 regions x 2 quarters.
-# Q2-2026 is "this quarter"; West is the clear laggard: revenue collapses from
-# 980k to 410k, units fall, returns spike. Every other region holds or grows, so
-# the worst-performer query has exactly one defensible answer.
+# (category, quarter, revenue, units, returns) — a consumer-electronics retailer,
+# 4 real product categories x 2 quarters. Real categories (not synthetic regions) so
+# the "research the causes" step has a genuine market story to find: DVD & Blu-ray
+# players are the clear laggard this quarter — revenue collapses 480k -> 180k, units
+# crater, returns spike — which maps to the real, researchable secular decline of
+# physical media as streaming takes over. Every other category holds or grows, so the
+# worst-performer query has exactly one defensible answer.
 _ROWS: list[tuple[str, str, int, int, int]] = [
-    ("North", "2026-Q1", 920_000, 4_100, 95),
-    ("South", "2026-Q1", 760_000, 3_500, 80),
-    ("East", "2026-Q1", 880_000, 3_900, 88),
-    ("West", "2026-Q1", 980_000, 4_300, 90),
-    ("North", "2026-Q2", 965_000, 4_250, 92),
-    ("South", "2026-Q2", 805_000, 3_650, 78),
-    ("East", "2026-Q2", 905_000, 4_000, 85),
-    ("West", "2026-Q2", 410_000, 1_850, 240),  # <- the worst region this quarter
+    ("Smartphones", "2026-Q1", 920_000, 4_100, 95),
+    ("Laptops", "2026-Q1", 760_000, 3_500, 80),
+    ("Streaming Devices", "2026-Q1", 540_000, 6_200, 70),
+    ("DVD & Blu-ray Players", "2026-Q1", 480_000, 2_200, 60),
+    ("Smartphones", "2026-Q2", 965_000, 4_250, 92),
+    ("Laptops", "2026-Q2", 805_000, 3_650, 78),
+    ("Streaming Devices", "2026-Q2", 690_000, 7_900, 75),
+    ("DVD & Blu-ray Players", "2026-Q2", 180_000, 820, 210),  # <- the worst category
 ]
 
+# Drop-then-create so a re-seed picks up schema changes (not just new rows) — a plain
+# CREATE IF NOT EXISTS would silently keep an older table's columns.
 _CREATE = """
-CREATE TABLE IF NOT EXISTS sales (
-    id       SERIAL PRIMARY KEY,
-    region   TEXT    NOT NULL,
-    quarter  TEXT    NOT NULL,
-    revenue  INTEGER NOT NULL,
-    units    INTEGER NOT NULL,
-    returns  INTEGER NOT NULL
+DROP TABLE IF EXISTS sales;
+CREATE TABLE sales (
+    id        SERIAL PRIMARY KEY,
+    category  TEXT    NOT NULL,
+    quarter   TEXT    NOT NULL,
+    revenue   INTEGER NOT NULL,
+    units     INTEGER NOT NULL,
+    returns   INTEGER NOT NULL
 );
 """
 
@@ -59,10 +65,9 @@ def _connect(dsn: str):  # type: ignore[no-untyped-def]
 
 def seed(dsn: str) -> None:
     with _connect(dsn) as conn, conn.cursor() as cur:
-        cur.execute(_CREATE)
-        cur.execute("DELETE FROM sales")  # idempotent re-seed
+        cur.execute(_CREATE)  # drops + recreates, so re-seeds are deterministic
         cur.executemany(
-            "INSERT INTO sales (region, quarter, revenue, units, returns) "
+            "INSERT INTO sales (category, quarter, revenue, units, returns) "
             "VALUES (%s, %s, %s, %s, %s)",
             _ROWS,
         )

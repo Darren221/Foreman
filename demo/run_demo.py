@@ -39,10 +39,10 @@ from foreman.storage.db import Conn
 from foreman.tools import build_default_registry
 
 TASK_TEXT = (
-    "Analyze the sales database: find the worst-performing region this quarter "
-    "(2026-Q2) by revenue, research likely market causes for that specific region, "
-    "and recommend a concrete action plan to turn it around. "
-    "The database has one table, sales(region TEXT, quarter TEXT, revenue INTEGER, "
+    "Analyze the sales database: find the worst-performing product category this "
+    "quarter (2026-Q2) by revenue, research likely market causes for that specific "
+    "category, and recommend a concrete action plan to turn it around. "
+    "The database has one table, sales(category TEXT, quarter TEXT, revenue INTEGER, "
     "units INTEGER, returns INTEGER), where quarter values look like '2026-Q2'."
 )
 
@@ -88,21 +88,28 @@ def main() -> int:
     print("=" * 70)
     result = runner.submit(task)
 
-    if result.status == "pending":
+    # A run can hit more than one human gate (the pre-execution sensitive-action gate
+    # AND a post-review gate), so approve in a loop until it actually completes — not
+    # just once. Stopping after one approval is why the result came back None: the run
+    # was still pending at a second gate, not finished.
+    gates = 0
+    while result.status == "pending" and gates < 5:
+        gates += 1
         esc = result.escalation
-        print(f"\n[HITL] paused for approval: trigger={esc.trigger} level={esc.level}")
+        print(f"\n[HITL] gate {gates}: trigger={esc.trigger} level={esc.level}")
         print(f"       reason: {esc.reason}")
-        print(f"       plan has {len(esc.plan.subtasks)} subtasks:")
-        for s in esc.plan.subtasks:
-            print(
-                f"         - {s.id} [{s.assigned_specialist}] "
-                f"deps={s.dependencies}: {s.description}"
-            )
-        print("\n[HITL] operator APPROVES the action plan...")
+        if esc.plan is not None:
+            print(f"       plan has {len(esc.plan.subtasks)} subtasks:")
+            for s in esc.plan.subtasks:
+                print(
+                    f"         - {s.id} [{s.assigned_specialist}] "
+                    f"deps={s.dependencies}: {s.description}"
+                )
+        print("[HITL] operator APPROVES...")
         result = runner.resume(result.approval_id, Decision(kind=DecisionKind.APPROVE))
 
     print("\n" + "=" * 70)
-    print("FINAL RESULT")
+    print(f"FINAL RESULT (status={result.status}, gates approved={gates})")
     print("=" * 70)
     print(result.result)
 
