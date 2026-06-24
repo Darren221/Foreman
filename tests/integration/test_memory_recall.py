@@ -46,11 +46,14 @@ class SeededMemoryStore(MemoryStore):
     def remember(self, memory: TaskMemory) -> None:
         self._memories.append(memory)
 
-    def recall(self, query: str, k: int = 5) -> list[TaskMemory]:
+    def recall(self, query: str, k: int = 5, user_id: str | None = None) -> list[TaskMemory]:
         return self._memories[:k]
 
     def delete(self, ids: list[str]) -> None:
         self._memories = [m for m in self._memories if m.id not in ids]
+
+    def delete_user(self, user_id: str) -> None:
+        self._memories = [m for m in self._memories if m.user_id != user_id]
 
 
 class FakeBackend:

@@ -34,6 +34,7 @@ class TaskRequest(BaseModel):
     description: str
     require_approval: bool = False
     sensitive: bool = False
+    user_id: str = "default"
 
 
 class TaskResponse(BaseModel):
@@ -70,6 +71,7 @@ def create_app(runner: Runner, queue: ApprovalQueue, memory_store: MemoryStore) 
             description=request.description,
             require_approval=request.require_approval,
             sensitive=request.sensitive,
+            user_id=request.user_id,
         )
         result = runner.submit(task)
         return _response(task.id, result)
@@ -103,9 +105,12 @@ def create_app(runner: Runner, queue: ApprovalQueue, memory_store: MemoryStore) 
 
     @app.delete("/memory/{memory_id}", status_code=204)
     def delete_memory(memory_id: str) -> None:
-        # The user-data delete path (SPEC §7). Memories aren't user-keyed yet, so the
-        # scope is purge-by-id; per-user scoping is a follow-up.
         memory_store.delete([memory_id])
+
+    @app.delete("/users/{user_id}/memory", status_code=204)
+    def delete_user_memory(user_id: str) -> None:
+        # The user-data delete path (SPEC §7): purge everything for one user.
+        memory_store.delete_user(user_id)
 
     return app
 

@@ -25,10 +25,13 @@ class NullMemoryStore(MemoryStore):
     def remember(self, memory: TaskMemory) -> None:
         return None
 
-    def recall(self, query: str, k: int = 5) -> list[TaskMemory]:
+    def recall(self, query: str, k: int = 5, user_id: str | None = None) -> list[TaskMemory]:
         return []
 
     def delete(self, ids: list[str]) -> None:
+        return None
+
+    def delete_user(self, user_id: str) -> None:
         return None
 
 
@@ -43,10 +46,18 @@ class DictMemoryStore(MemoryStore):
     def remember(self, memory: TaskMemory) -> None:
         self._items[memory.id] = memory
 
-    def recall(self, query: str, k: int = 5) -> list[TaskMemory]:
-        hits = [m for m in self._items.values() if query.lower() in m.task_description.lower()]
+    def recall(self, query: str, k: int = 5, user_id: str | None = None) -> list[TaskMemory]:
+        hits = [
+            m
+            for m in self._items.values()
+            if query.lower() in m.task_description.lower()
+            and (user_id is None or m.user_id == user_id)
+        ]
         return hits[:k]
 
     def delete(self, ids: list[str]) -> None:
         for memory_id in ids:
             self._items.pop(memory_id, None)
+
+    def delete_user(self, user_id: str) -> None:
+        self._items = {i: m for i, m in self._items.items() if m.user_id != user_id}

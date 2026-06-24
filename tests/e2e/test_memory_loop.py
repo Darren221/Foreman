@@ -94,3 +94,25 @@ def test_repeat_task_recalls_prior_memory(tmp_path: Path) -> None:
     assert state["retrieved_memories"]
     assert state["retrieved_memories"][0].task_description == "history of the bicycle"
     assert any("history of the bicycle" in p for p in second.prompts)
+
+
+def test_memory_is_not_recalled_across_users(tmp_path: Path) -> None:
+    store = ChromaMemoryStore(tmp_path / "mem", FakeEmbedder())
+
+    # alice runs a task; it writes a memory scoped to her.
+    run_task(
+        RecordingProvider(_plan()),
+        Task(description="history of the bicycle", user_id="alice"),
+        registry=_registry(),
+        memory_store=store,
+    )
+
+    # bob runs a similar task; he must not recall alice's memory.
+    bob = RecordingProvider(_plan())
+    state = run_task(
+        bob,
+        Task(description="history of the bicycle in detail", user_id="bob"),
+        registry=_registry(),
+        memory_store=store,
+    )
+    assert state["retrieved_memories"] == []

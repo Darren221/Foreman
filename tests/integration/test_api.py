@@ -212,3 +212,28 @@ def test_pending_run_status_survives_a_fresh_app(tmp_path: Path) -> None:
         assert body["status"] == "pending"
         assert body["approval_id"]
         queue2.close()
+
+
+def test_delete_user_memory_endpoint_is_scoped(tmp_path: Path) -> None:
+    memory = DictMemoryStore()
+    memory.remember(
+        TaskMemory(task_description="alice secret", outcome="passed", score=0.9, user_id="alice")
+    )
+    memory.remember(
+        TaskMemory(task_description="bob note", outcome="passed", score=0.9, user_id="bob")
+    )
+    with SqliteSaver.from_conn_string(str(tmp_path / "c.sqlite")) as saver:
+        queue = ApprovalQueue(tmp_path / "q.sqlite")
+        runner = Runner(
+            provider=EchoProvider(_plan()),
+            registry=_registry(),
+            memory_store=memory,
+            checkpointer=saver,
+            queue=queue,
+        )
+        client = TestClient(create_app(runner, queue, memory))
+
+        assert client.delete("/users/alice/memory").status_code == 204
+        assert memory.recall("alice secret", user_id="alice") == []
+        assert [m.user_id for m in memory.recall("bob note", user_id="bob")] == ["bob"]
+        queue.close()

@@ -25,7 +25,24 @@ def _memory(description: str, **kw: object) -> TaskMemory:
         outcome=str(kw.get("outcome", "passed")),
         score=float(kw.get("score", 0.9)),  # type: ignore[arg-type]
         tools_used=list(kw.get("tools_used", [])),  # type: ignore[arg-type]
+        user_id=str(kw.get("user_id", "default")),
     )
+
+
+def test_recall_and_delete_are_scoped_per_user(tmp_path: Path) -> None:
+    store = ChromaMemoryStore(tmp_path / "mem", FakeEmbedder())
+    store.remember(_memory("history of the bicycle", user_id="alice"))
+    store.remember(_memory("history of the bicycle", user_id="bob"))
+
+    # recall is scoped to the asking user
+    alice = store.recall("history of the bicycle", k=5, user_id="alice")
+    assert [m.user_id for m in alice] == ["alice"]
+
+    # deleting alice's data leaves bob's intact
+    store.delete_user("alice")
+    assert store.recall("history of the bicycle", k=5, user_id="alice") == []
+    bob = store.recall("history of the bicycle", k=5, user_id="bob")
+    assert [m.user_id for m in bob] == ["bob"]
 
 
 def test_remember_and_recall_roundtrip(tmp_path: Path) -> None:
